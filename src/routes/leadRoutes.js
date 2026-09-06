@@ -2,6 +2,7 @@ import { Router } from 'express';
 import Lead from '../models/Lead.js';
 import User from '../models/User.js';
 import { requireAuth } from '../middleware/auth.js';
+import { sendWhatsAppMessage } from '../services/whatsapp.js';
 
 const router = Router();
 const isAdmin = (user) => [1, 3].includes(user.role);
@@ -20,12 +21,12 @@ function serializeLead(lead) {
     customerType: lead.customerType || '', segment: lead.segment || '', companyPersons: lead.companyPersons || [], leadSource: lead.leadSource || lead.source || '', stage: lead.stage || lead.status || 'New',
     email: lead.email || '',
     phone: lead.phone || '',
+    whatsappIdentity: lead.whatsappIdentity || '',
     source: lead.leadSource || lead.source || 'Website',
     status: lead.stage || lead.status || 'New',
     priority: lead.priority || 'Medium',
     nextFollowUp: lead.nextFollowUp || null,
     followUps: lead.followUps || [],
-    notes: lead.notes || '',
     assignedTo: lead.assignedTo?._id || lead.assignedTo,
     assignedName: lead.assignedTo?.name || 'Unassigned',
     createdAt: lead.createdAt,
@@ -72,13 +73,13 @@ router.get('/', requireAuth, async (request, response, next) => {
 
 router.post('/', requireAuth, async (request, response, next) => {
   try {
-    const { name, company, address1, address2, area, city, state, email, website, phone, contactNumber, customerType, segment, companyPersons, leadSource, source, stage, status, priority, nextFollowUp, notes, assignedTo } = request.body || {};
+    const { name, company, address1, address2, area, city, state, email, website, phone, contactNumber, customerType, segment, companyPersons, leadSource, source, stage, status, priority, nextFollowUp, assignedTo } = request.body || {};
     const selectedAssignee = isAdmin(request.user) ? assignedTo : request.user._id;
     if (!selectedAssignee) return response.status(400).json({ message: 'An assigned user is required.' });
     const assignee = await User.findById(selectedAssignee).select('_id name').lean();
     if (!assignee) return response.status(404).json({ message: 'Assigned user was not found.' });
-    const followUps = notes?.trim() || nextFollowUp ? [{ date: new Date(), description: notes?.trim() || 'Lead created', nextDate: nextFollowUp || undefined }] : [];
-    const lead = await Lead.create({ name: name?.trim() || '', company: company?.trim(), address1, address2, area, city, state, email, website, phone: contactNumber || phone, customerType, segment, companyPersons, leadSource: leadSource || source || '', source: leadSource || source || '', stage: stage || status || 'New', status: stage || status || 'New', priority: priority || 'Medium', nextFollowUp: nextFollowUp || undefined, notes: notes?.trim(), followUps, assignedTo: assignee._id, createdBy: request.user._id });
+    const followUps = [];
+    const lead = await Lead.create({ name: name?.trim() || '', company: company?.trim(), address1, address2, area, city, state, email, website, phone: contactNumber || phone, customerType, segment, companyPersons, leadSource: leadSource || source || '', source: leadSource || source || '', stage: stage || status || 'New', status: stage || status || 'New', priority: priority || 'Medium', nextFollowUp: nextFollowUp || undefined, followUps, assignedTo: assignee._id, createdBy: request.user._id });
     const populated = await lead.populate('assignedTo', 'name');
     return response.status(201).json({ lead: serializeLead(populated.toObject()) });
   } catch (error) { return next(error); }
@@ -89,8 +90,8 @@ router.put('/:id', requireAuth, async (request, response, next) => {
     const lead = await Lead.findById(request.params.id);
     if (!lead) return response.status(404).json({ message: 'Lead not found.' });
     if (!isAdmin(request.user) && lead.assignedTo.toString() !== request.user._id.toString()) return response.status(403).json({ message: 'You can only edit leads assigned to you.' });
-    const { name, company, address1, address2, area, city, state, email, website, phone, contactNumber, customerType, segment, companyPersons, leadSource, source, stage, status, priority, nextFollowUp, notes, assignedTo } = request.body || {};
-    Object.assign(lead, { name: name?.trim() || '', company: company?.trim(), address1, address2, area, city, state, email, website, phone: contactNumber || phone, customerType, segment, companyPersons, leadSource: leadSource || source || '', source: leadSource || source || '', stage: stage || status || 'New', status: stage || status || 'New', priority: priority || 'Medium', nextFollowUp: nextFollowUp || undefined, notes: notes?.trim() });
+    const { name, company, address1, address2, area, city, state, email, website, phone, contactNumber, customerType, segment, companyPersons, leadSource, source, stage, status, priority, nextFollowUp, assignedTo } = request.body || {};
+    Object.assign(lead, { name: name?.trim() || '', company: company?.trim(), address1, address2, area, city, state, email, website, phone: contactNumber || phone, customerType, segment, companyPersons, leadSource: leadSource || source || '', source: leadSource || source || '', stage: stage || status || 'New', status: stage || status || 'New', priority: priority || 'Medium', nextFollowUp: nextFollowUp || undefined });
     if (isAdmin(request.user) && assignedTo) lead.assignedTo = assignedTo;
     await lead.save();
     const populated = await lead.populate('assignedTo', 'name');
@@ -157,6 +158,20 @@ router.delete('/:id/followups/:followUpId', requireAuth, async (request, respons
     await result.lead.save();
     const populated = await result.lead.populate('assignedTo', 'name');
     return response.json({ lead: serializeLead(populated.toObject()) });
+  } catch (error) { return next(error); }
+});
+
+router.post('/:id/followups/:followUpId/send-whatsapp', requireAuth, async (request, response, next) => {
+  try {
+    const result = await getAccessibleLead(request, request.params.id);
+    if (result.error) return response.status(result.status).json({ message: result.error });
+    if (!result.lead.whatsappIdentity) return response.status(400).json({ message: 'WhatsApp messaging is available only for leads received from WhatsApp.' });
+    const followUp = result.lead.followUps.id(request.params.followUpId);
+    if (!followUp) return response.status(404).json({ message: 'Follow-up not found.' });
+    const body = String(request.body?.message || followUp.description || '').trim();
+    if (!body) return response.status(400).json({ message: 'Follow-up message cannot be empty.' });
+    const sent = await sendWhatsAppMessage(result.lead.whatsappIdentity, body);
+    return response.json({ message: 'Follow-up message sent on WhatsApp.', messageId: sent.id });
   } catch (error) { return next(error); }
 });
 

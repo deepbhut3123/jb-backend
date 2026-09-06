@@ -18,7 +18,6 @@ const quotationSchema = new mongoose.Schema(
     }],
     amount: { type: Number, required: true, min: 0 },
     status: { type: String, enum: ['Draft', 'Sent', 'Accepted', 'Rejected'], default: 'Draft' },
-    notes: { type: String, trim: true, maxlength: 1000 },
     createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
   },
   { timestamps: true },

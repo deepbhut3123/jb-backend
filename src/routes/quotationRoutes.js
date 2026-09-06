@@ -17,7 +17,6 @@ function serializeQuotation(quotation) {
     items: quotation.items || [],
     amount: quotation.amount,
     status: quotation.status,
-    notes: quotation.notes || '',
     createdBy: quotation.createdBy?._id || quotation.createdBy,
     createdByName: quotation.createdBy?.name || '',
     createdAt: quotation.createdAt,
@@ -47,7 +46,6 @@ async function normalizeQuotation(body = {}) {
     items,
     amount: items.reduce((total, item) => total + item.lineTotal, 0),
     status: String(body.status || 'Draft').trim(),
-    notes: String(body.notes || '').trim(),
   };
 }
 
@@ -86,6 +84,17 @@ router.put('/:id', async (request, response, next) => {
     const validationError = validateQuotation(quotationData);
     if (validationError) return response.status(400).json({ message: validationError });
     const quotation = await Quotation.findOneAndUpdate(filter, quotationData, { new: true, runValidators: true }).populate('createdBy', 'name');
+    if (!quotation) return response.status(404).json({ message: 'Quotation not found.' });
+    return response.json({ quotation: serializeQuotation(quotation.toObject()) });
+  } catch (error) { return next(error); }
+});
+
+router.patch('/:id/status', async (request, response, next) => {
+  try {
+    const status = request.body?.status;
+    if (!statuses.includes(status)) return response.status(400).json({ message: 'Please select a valid quotation status.' });
+    const filter = isAdmin(request.user) ? { _id: request.params.id } : { _id: request.params.id, createdBy: request.user._id };
+    const quotation = await Quotation.findOneAndUpdate(filter, { $set: { status } }, { new: true, runValidators: true }).populate('createdBy', 'name');
     if (!quotation) return response.status(404).json({ message: 'Quotation not found.' });
     return response.json({ quotation: serializeQuotation(quotation.toObject()) });
   } catch (error) { return next(error); }

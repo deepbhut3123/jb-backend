@@ -12,6 +12,8 @@ import productRoutes from './routes/productRoutes.js';
 import quotationRoutes from './routes/quotationRoutes.js';
 import leadOptionRoutes from './routes/leadOptionRoutes.js';
 import categoryRoutes from './routes/categoryRoutes.js';
+import whatsappRoutes from './routes/whatsappRoutes.js';
+import { startWhatsAppService, stopWhatsAppService } from './services/whatsapp.js';
 
 dotenv.config();
 
@@ -32,6 +34,7 @@ app.use('/api/products', productRoutes);
 app.use('/api/quotations', quotationRoutes);
 app.use('/api/lead-options', leadOptionRoutes);
 app.use('/api/categories', categoryRoutes);
+app.use('/api/whatsapp', whatsappRoutes);
 
 app.get('/api/health', (_request, response) => {
   response.json({
@@ -52,9 +55,22 @@ app.use((error, _request, response, _next) => {
 
 connectDatabase()
   .then(() => {
-    app.listen(port, () => {
+    const server = app.listen(port, () => {
       console.log(`API server listening on http://localhost:${port}`);
     });
+    startWhatsAppService().catch((error) => console.error('WhatsApp service startup failed:', error.message));
+    let stopping = false;
+    async function shutdown() {
+      if (stopping) return;
+      stopping = true;
+      const timeout = setTimeout(() => process.exit(1), 15000);
+      timeout.unref();
+      server.close();
+      try { await stopWhatsAppService(); process.exit(0); }
+      catch { process.exit(1); }
+    }
+    process.on('SIGTERM', shutdown);
+    process.on('SIGINT', shutdown);
   })
   .catch((error) => {
     console.error('Failed to start server:', error.message);
