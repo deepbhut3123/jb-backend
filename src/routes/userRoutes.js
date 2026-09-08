@@ -21,10 +21,19 @@ const publicUser = (user) => ({
   roleLabel: [1, 3].includes(user.role) ? 'Admin' : 'User',
 });
 
-router.get('/', requireAuth, requireAdmin, async (_request, response, next) => {
+router.get('/', requireAuth, requireAdmin, async (request, response, next) => {
   try {
-    const users = await User.find().select('name email phone role createdAt').sort({ createdAt: -1 }).lean();
-    return response.json({ users: users.map(publicUser) });
+    const page = Math.max(Number.parseInt(request.query.page, 10) || 1, 1);
+    const limit = Math.min(Math.max(Number.parseInt(request.query.limit, 10) || 10, 1), 100);
+    const filter = {};
+    if (request.query.role === 'users') filter.role = 2;
+    if (request.query.role === 'admins') filter.role = { $ne: 2 };
+    if (request.query.search?.trim()) { const query = request.query.search.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); filter.$or = [{ name: { $regex: query, $options: 'i' } }, { email: { $regex: query, $options: 'i' } }, { phone: { $regex: query, $options: 'i' } }]; }
+    const [total, users] = await Promise.all([
+      User.countDocuments(filter),
+      User.find(filter).select('name email phone role createdAt').sort({ createdAt: -1 }).skip((page - 1) * limit).limit(limit).lean(),
+    ]);
+    return response.json({ users: users.map(publicUser), pagination: { page, limit, total, totalPages: Math.max(Math.ceil(total / limit), 1) } });
   } catch (error) { return next(error); }
 });
 
