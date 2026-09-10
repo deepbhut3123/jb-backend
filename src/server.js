@@ -39,6 +39,7 @@ app.use('/api/whatsapp', whatsappRoutes);
 app.get('/api/health', (_request, response) => {
   response.json({
     status: 'ok',
+    service: 'jb-backend',
     message: 'Backend is running.',
     database: getDatabaseStatus(),
   });
