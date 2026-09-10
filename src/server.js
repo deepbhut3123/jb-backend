@@ -21,8 +21,22 @@ const app = express();
 const port = process.env.PORT || 5000;
 const currentFile = fileURLToPath(import.meta.url);
 const currentDirectory = path.dirname(currentFile);
+const normalizeOrigin = (origin) => origin.trim().replace(/\/+$/, '');
+const allowedOrigins = (process.env.CLIENT_URL || 'http://localhost:5173')
+  .split(',')
+  .map(normalizeOrigin)
+  .filter(Boolean);
 
-app.use(cors({ origin: process.env.CLIENT_URL || 'http://localhost:5173' }));
+app.use(cors({
+  origin(origin, callback) {
+    const normalizedOrigin = origin ? normalizeOrigin(origin) : '';
+    if (!origin || allowedOrigins.includes(normalizedOrigin)) {
+      callback(null, true);
+      return;
+    }
+    callback(new Error(`Origin ${origin} is not allowed by CORS.`));
+  },
+}));
 app.use(express.json());
 app.use('/public', express.static(path.join(currentDirectory, '..', 'public')));
 
