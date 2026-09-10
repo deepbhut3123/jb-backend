@@ -26,11 +26,26 @@ const allowedOrigins = (process.env.CLIENT_URL || 'http://localhost:5173')
   .split(',')
   .map(normalizeOrigin)
   .filter(Boolean);
+const frontendVercelProject = process.env.FRONTEND_VERCEL_PROJECT || 'jb-frontend';
+const frontendVercelScope = process.env.FRONTEND_VERCEL_SCOPE || 'deep-bhuts-projects';
+
+function isFrontendVercelOrigin(origin) {
+  try {
+    const url = new URL(origin);
+    return url.protocol === 'https:'
+      && url.hostname.endsWith('.vercel.app')
+      && (url.hostname === `${frontendVercelProject}.vercel.app`
+        || (url.hostname.startsWith(`${frontendVercelProject}-`)
+          && url.hostname.endsWith(`-${frontendVercelScope}.vercel.app`)));
+  } catch {
+    return false;
+  }
+}
 
 app.use(cors({
   origin(origin, callback) {
     const normalizedOrigin = origin ? normalizeOrigin(origin) : '';
-    if (!origin || allowedOrigins.includes(normalizedOrigin)) {
+    if (!origin || allowedOrigins.includes(normalizedOrigin) || isFrontendVercelOrigin(normalizedOrigin)) {
       callback(null, true);
       return;
     }
