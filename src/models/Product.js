@@ -10,6 +10,7 @@ const productSchema = new mongoose.Schema(
     brand: { type: String, trim: true, maxlength: 80 },
     category: { type: String, trim: true, maxlength: 80 },
     subCategory: { type: String, trim: true, maxlength: 80 },
+    subSubCategory: { type: String, trim: true, maxlength: 80 },
     image: { type: String, trim: true, maxlength: 500 },
     taxRate: { type: Number, min: 0, enum: [0, 5, 12, 18, 28], default: 18 },
     mrp: { type: Number, min: 0 },

@@ -44,6 +44,7 @@ function normalizeProduct(body = {}, imageFile) {
     brand: String(body.brand || '').trim(),
     category: String(body.category || '').trim(),
     subCategory: String(body.subCategory || '').trim(),
+    subSubCategory: String(body.subSubCategory || '').trim(),
     image: imageFile ? `/public/products/${imageFile.filename}` : String(body.image || '').trim(),
     taxRate: body.taxRate === '' || body.taxRate == null ? Number.NaN : Number(body.taxRate),
     hsnCode: String(body.hsnCode || '').trim(),
@@ -68,7 +69,7 @@ router.get('/', async (request, response, next) => {
     const filter = {};
     if (request.query.status === 'active') filter.isActive = true;
     if (request.query.status === 'inactive') filter.isActive = false;
-    if (request.query.search?.trim()) { const query = request.query.search.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); filter.$or = [{ partCode: { $regex: query, $options: 'i' } }, { code: { $regex: query, $options: 'i' } }, { description: { $regex: query, $options: 'i' } }, { name: { $regex: query, $options: 'i' } }, { brand: { $regex: query, $options: 'i' } }, { category: { $regex: query, $options: 'i' } }, { subCategory: { $regex: query, $options: 'i' } }, { hsnCode: { $regex: query, $options: 'i' } }]; }
+    if (request.query.search?.trim()) { const query = request.query.search.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); filter.$or = [{ partCode: { $regex: query, $options: 'i' } }, { code: { $regex: query, $options: 'i' } }, { description: { $regex: query, $options: 'i' } }, { name: { $regex: query, $options: 'i' } }, { brand: { $regex: query, $options: 'i' } }, { category: { $regex: query, $options: 'i' } }, { subCategory: { $regex: query, $options: 'i' } }, { subSubCategory: { $regex: query, $options: 'i' } }, { hsnCode: { $regex: query, $options: 'i' } }]; }
     const [total, products] = await Promise.all([Product.countDocuments(filter), Product.find(filter).sort({ createdAt: -1 }).skip((page - 1) * limit).limit(limit).lean()]);
     return response.json({ products, pagination: { page, limit, total, totalPages: Math.max(Math.ceil(total / limit), 1) } });
   } catch (error) { return next(error); }

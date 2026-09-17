@@ -37,6 +37,8 @@ function serializeQuotation(quotation) {
 
 async function normalizeQuotation(body = {}) {
   const requestedItems = Array.isArray(body.items) ? body.items : [];
+  const requestedGlobalDiscount = Number(body.discountPercent || 0);
+  const fallbackDiscountPercent = Number.isFinite(requestedGlobalDiscount) ? Math.min(Math.max(requestedGlobalDiscount, 0), 100) : 0;
   const productIds = [...new Set(requestedItems.map((item) => String(item.productId || '')).filter(Boolean))];
   const products = await Product.find({ _id: { $in: productIds }, isActive: true }).lean();
   const productMap = new Map(products.map((product) => [String(product._id), product]));
@@ -46,13 +48,22 @@ async function normalizeQuotation(body = {}) {
     if (!product || !Number.isFinite(quantity) || quantity <= 0) return null;
     const unitPrice = Number(product.mrp ?? product.salePrice);
     if (!Number.isFinite(unitPrice) || unitPrice < 0) return null;
-    const lineTotal = quantity * unitPrice;
-    return { productId: product._id, productName: product.description || product.name, productCode: product.partCode || product.code, unit: product.unit || '', quantity, unitPrice, taxRate: product.taxRate, lineTotal };
+    const lineSubtotal = Number((quantity * unitPrice).toFixed(2));
+    const usesAmount = item.discountMode === 'amount';
+    const requestedLinePercent = Number(item.discountPercent ?? fallbackDiscountPercent);
+    const safeLinePercent = Number.isFinite(requestedLinePercent) ? Math.min(Math.max(requestedLinePercent, 0), 100) : 0;
+    const requestedLineAmount = Number(item.discountAmount);
+    const discountAmount = usesAmount && Number.isFinite(requestedLineAmount)
+      ? Number(Math.min(Math.max(requestedLineAmount, 0), lineSubtotal).toFixed(2))
+      : Number((lineSubtotal * safeLinePercent / 100).toFixed(2));
+    const discountPercent = lineSubtotal > 0 ? Number(((discountAmount / lineSubtotal) * 100).toFixed(6)) : 0;
+    const lineTotal = Number((lineSubtotal - discountAmount).toFixed(2));
+    const description = String(item.description ?? product.description ?? product.name ?? '').trim();
+    return { productId: product._id, productName: product.description || product.name, productCode: product.partCode || product.code, description, unit: product.unit || '', quantity, unitPrice, taxRate: product.taxRate, lineSubtotal, discountPercent, discountAmount, lineTotal };
   }).filter(Boolean);
-  const subtotal = items.reduce((total, item) => total + item.lineTotal, 0);
-  const requestedDiscount = Number(body.discountPercent || 0);
-  const discountPercent = Number.isFinite(requestedDiscount) ? Math.min(Math.max(requestedDiscount, 0), 100) : 0;
-  const discountAmount = Number((subtotal * discountPercent / 100).toFixed(2));
+  const subtotal = Number(items.reduce((total, item) => total + item.lineSubtotal, 0).toFixed(2));
+  const discountAmount = Number(items.reduce((total, item) => total + item.discountAmount, 0).toFixed(2));
+  const discountPercent = subtotal > 0 ? Number(((discountAmount / subtotal) * 100).toFixed(6)) : 0;
   return {
     leadId: String(body.leadId || '').trim(),
     customerName: String(body.customerName || '').trim(),
@@ -63,7 +74,7 @@ async function normalizeQuotation(body = {}) {
     subtotal,
     discountPercent,
     discountAmount,
-    amount: Number((subtotal - discountAmount).toFixed(2)),
+    amount: Number(items.reduce((total, item) => total + item.lineTotal, 0).toFixed(2)),
     quotationDate: body.quotationDate ? new Date(body.quotationDate) : new Date(),
     status: String(body.status || 'Draft').trim(),
   };
