@@ -25,6 +25,7 @@ const quotationSchema = new mongoose.Schema(
       lineTotal: { type: Number, required: true, min: 0 },
     }],
     subtotal: { type: Number, required: true, min: 0 },
+    freightPacking: { type: Number, min: 0, default: 0 },
     discountPercent: { type: Number, min: 0, max: 100, default: 0 },
     discountAmount: { type: Number, min: 0, default: 0 },
     amount: { type: Number, required: true, min: 0 },

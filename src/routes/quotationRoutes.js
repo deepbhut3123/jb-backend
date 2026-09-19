@@ -10,10 +10,18 @@ const isAdmin = (user) => [1, 3].includes(user.role);
 const statuses = ['Draft', 'Sent', 'Accepted', 'Rejected'];
 
 function serializeQuotation(quotation) {
+  const populatedLead = quotation.leadId && typeof quotation.leadId === 'object' && quotation.leadId._id ? quotation.leadId : null;
   return {
     _id: quotation._id,
     leadId: quotation.leadId?._id || quotation.leadId,
     leadName: quotation.leadId?.name || quotation.customerName,
+    leadAddress: populatedLead ? {
+      address1: populatedLead.address1 || '',
+      address2: populatedLead.address2 || '',
+      area: populatedLead.area || '',
+      city: populatedLead.city || '',
+      state: populatedLead.state || '',
+    } : null,
     revisedFrom: quotation.revisedFrom?._id || quotation.revisedFrom || null,
     revisionRoot: quotation.revisionRoot?._id || quotation.revisionRoot || null,
     revisionNumber: quotation.revisionNumber || 0,
@@ -23,6 +31,7 @@ function serializeQuotation(quotation) {
     phone: quotation.phone || '',
     items: quotation.items || [],
     subtotal: quotation.subtotal ?? quotation.amount,
+    freightPacking: quotation.freightPacking || 0,
     discountPercent: quotation.discountPercent || 0,
     discountAmount: quotation.discountAmount || 0,
     amount: quotation.amount,
@@ -64,6 +73,8 @@ async function normalizeQuotation(body = {}) {
   const subtotal = Number(items.reduce((total, item) => total + item.lineSubtotal, 0).toFixed(2));
   const discountAmount = Number(items.reduce((total, item) => total + item.discountAmount, 0).toFixed(2));
   const discountPercent = subtotal > 0 ? Number(((discountAmount / subtotal) * 100).toFixed(6)) : 0;
+  const requestedFreightPacking = Number(body.freightPacking || 0);
+  const freightPacking = Number((Number.isFinite(requestedFreightPacking) ? Math.max(requestedFreightPacking, 0) : 0).toFixed(2));
   return {
     leadId: String(body.leadId || '').trim(),
     customerName: String(body.customerName || '').trim(),
@@ -72,9 +83,10 @@ async function normalizeQuotation(body = {}) {
     phone: String(body.phone || '').trim(),
     items,
     subtotal,
+    freightPacking,
     discountPercent,
     discountAmount,
-    amount: Number(items.reduce((total, item) => total + item.lineTotal, 0).toFixed(2)),
+    amount: Number((items.reduce((total, item) => total + item.lineTotal, 0) + freightPacking).toFixed(2)),
     quotationDate: body.quotationDate ? new Date(body.quotationDate) : new Date(),
     status: String(body.status || 'Draft').trim(),
   };
@@ -140,7 +152,7 @@ router.get('/', async (request, response, next) => {
       }
     }
     if (queryConditions.length) filter.$and = queryConditions;
-    const quotations = await Quotation.find(filter).populate('createdBy', 'name').populate('leadId', 'name company').sort({ createdAt: -1 }).lean();
+    const quotations = await Quotation.find(filter).populate('createdBy', 'name').populate('leadId', 'name company address1 address2 area city state').sort({ createdAt: -1 }).lean();
     const summary = {
       total: quotations.length,
       sent: quotations.filter((item) => item.status === 'Sent').length,
@@ -172,7 +184,7 @@ router.post('/', async (request, response, next) => {
     }
     const quotation = await Quotation.create({ ...quotationData, revisedFrom, revisionRoot, revisionNumber, createdBy: request.user._id });
     await Lead.updateOne({ _id: lead._id }, { $set: { stage: 'Quotation', status: 'Quotation' } });
-    await quotation.populate([{ path: 'createdBy', select: 'name' }, { path: 'leadId', select: 'name company' }]);
+    await quotation.populate([{ path: 'createdBy', select: 'name' }, { path: 'leadId', select: 'name company address1 address2 area city state' }]);
     return response.status(201).json({ quotation: serializeQuotation(quotation.toObject()) });
   } catch (error) { return next(error); }
 });
@@ -185,7 +197,7 @@ router.put('/:id', async (request, response, next) => {
     if (validationError) return response.status(400).json({ message: validationError });
     const lead = await Lead.findOne(leadScope(request.user, quotationData.leadId)).lean();
     if (!lead) return response.status(404).json({ message: 'Lead not found or is not available to you.' });
-    const quotation = await Quotation.findOneAndUpdate(filter, quotationData, { new: true, runValidators: true }).populate([{ path: 'createdBy', select: 'name' }, { path: 'leadId', select: 'name company' }]);
+    const quotation = await Quotation.findOneAndUpdate(filter, quotationData, { new: true, runValidators: true }).populate([{ path: 'createdBy', select: 'name' }, { path: 'leadId', select: 'name company address1 address2 area city state' }]);
     if (!quotation) return response.status(404).json({ message: 'Quotation not found.' });
     return response.json({ quotation: serializeQuotation(quotation.toObject()) });
   } catch (error) { return next(error); }
@@ -196,7 +208,7 @@ router.patch('/:id/status', async (request, response, next) => {
     const status = request.body?.status;
     if (!statuses.includes(status)) return response.status(400).json({ message: 'Please select a valid quotation status.' });
     const filter = isAdmin(request.user) ? { _id: request.params.id } : { _id: request.params.id, createdBy: request.user._id };
-    const quotation = await Quotation.findOneAndUpdate(filter, { $set: { status } }, { new: true, runValidators: true }).populate([{ path: 'createdBy', select: 'name' }, { path: 'leadId', select: 'name company' }]);
+    const quotation = await Quotation.findOneAndUpdate(filter, { $set: { status } }, { new: true, runValidators: true }).populate([{ path: 'createdBy', select: 'name' }, { path: 'leadId', select: 'name company address1 address2 area city state' }]);
     if (!quotation) return response.status(404).json({ message: 'Quotation not found.' });
     return response.json({ quotation: serializeQuotation(quotation.toObject()) });
   } catch (error) { return next(error); }
