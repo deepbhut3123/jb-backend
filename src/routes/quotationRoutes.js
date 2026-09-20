@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import mongoose from 'mongoose';
 import Quotation from '../models/Quotation.js';
+import QuotationCounter from '../models/QuotationCounter.js';
 import Product from '../models/Product.js';
 import Lead from '../models/Lead.js';
 import { requireAuth } from '../middleware/auth.js';
@@ -25,6 +26,9 @@ function serializeQuotation(quotation) {
     revisedFrom: quotation.revisedFrom?._id || quotation.revisedFrom || null,
     revisionRoot: quotation.revisionRoot?._id || quotation.revisionRoot || null,
     revisionNumber: quotation.revisionNumber || 0,
+    quotationYear: quotation.quotationYear || null,
+    serialNumber: quotation.serialNumber || null,
+    creatorInitial: quotation.creatorInitial || '',
     customerName: quotation.customerName,
     company: quotation.company || '',
     email: quotation.email || '',
@@ -34,6 +38,8 @@ function serializeQuotation(quotation) {
     freightPacking: quotation.freightPacking || 0,
     discountPercent: quotation.discountPercent || 0,
     discountAmount: quotation.discountAmount || 0,
+    generalDiscountPercent: quotation.generalDiscountPercent || 0,
+    generalDiscountAmount: quotation.generalDiscountAmount || 0,
     amount: quotation.amount,
     quotationDate: quotation.quotationDate || quotation.createdAt,
     status: quotation.status,
@@ -46,8 +52,6 @@ function serializeQuotation(quotation) {
 
 async function normalizeQuotation(body = {}) {
   const requestedItems = Array.isArray(body.items) ? body.items : [];
-  const requestedGlobalDiscount = Number(body.discountPercent || 0);
-  const fallbackDiscountPercent = Number.isFinite(requestedGlobalDiscount) ? Math.min(Math.max(requestedGlobalDiscount, 0), 100) : 0;
   const productIds = [...new Set(requestedItems.map((item) => String(item.productId || '')).filter(Boolean))];
   const products = await Product.find({ _id: { $in: productIds }, isActive: true }).lean();
   const productMap = new Map(products.map((product) => [String(product._id), product]));
@@ -58,13 +62,13 @@ async function normalizeQuotation(body = {}) {
     const unitPrice = Number(product.mrp ?? product.salePrice);
     if (!Number.isFinite(unitPrice) || unitPrice < 0) return null;
     const lineSubtotal = Number((quantity * unitPrice).toFixed(2));
-    const usesAmount = item.discountMode === 'amount';
-    const requestedLinePercent = Number(item.discountPercent ?? fallbackDiscountPercent);
-    const safeLinePercent = Number.isFinite(requestedLinePercent) ? Math.min(Math.max(requestedLinePercent, 0), 100) : 0;
-    const requestedLineAmount = Number(item.discountAmount);
-    const discountAmount = usesAmount && Number.isFinite(requestedLineAmount)
-      ? Number(Math.min(Math.max(requestedLineAmount, 0), lineSubtotal).toFixed(2))
-      : Number((lineSubtotal * safeLinePercent / 100).toFixed(2));
+    const usesDiscountAmount = item.discountMode === 'amount';
+    const requestedDiscountPercent = Number(item.discountPercent || 0);
+    const safeDiscountPercent = Number.isFinite(requestedDiscountPercent) ? Math.min(Math.max(requestedDiscountPercent, 0), 100) : 0;
+    const requestedDiscountAmount = Number(item.discountAmount || 0);
+    const discountAmount = usesDiscountAmount && Number.isFinite(requestedDiscountAmount)
+      ? Number(Math.min(Math.max(requestedDiscountAmount, 0), lineSubtotal).toFixed(2))
+      : Number((lineSubtotal * safeDiscountPercent / 100).toFixed(2));
     const discountPercent = lineSubtotal > 0 ? Number(((discountAmount / lineSubtotal) * 100).toFixed(6)) : 0;
     const lineTotal = Number((lineSubtotal - discountAmount).toFixed(2));
     const description = String(item.description ?? product.description ?? product.name ?? '').trim();
@@ -73,6 +77,15 @@ async function normalizeQuotation(body = {}) {
   const subtotal = Number(items.reduce((total, item) => total + item.lineSubtotal, 0).toFixed(2));
   const discountAmount = Number(items.reduce((total, item) => total + item.discountAmount, 0).toFixed(2));
   const discountPercent = subtotal > 0 ? Number(((discountAmount / subtotal) * 100).toFixed(6)) : 0;
+  const productsAmount = Number(items.reduce((total, item) => total + item.lineTotal, 0).toFixed(2));
+  const usesGeneralDiscountAmount = body.generalDiscountMode === 'amount';
+  const requestedGeneralDiscountPercent = Number(body.generalDiscountPercent || 0);
+  const safeGeneralDiscountPercent = Number.isFinite(requestedGeneralDiscountPercent) ? Math.min(Math.max(requestedGeneralDiscountPercent, 0), 100) : 0;
+  const requestedGeneralDiscountAmount = Number(body.generalDiscountAmount || 0);
+  const generalDiscountAmount = usesGeneralDiscountAmount && Number.isFinite(requestedGeneralDiscountAmount)
+    ? Number(Math.min(Math.max(requestedGeneralDiscountAmount, 0), productsAmount).toFixed(2))
+    : Number((productsAmount * safeGeneralDiscountPercent / 100).toFixed(2));
+  const generalDiscountPercent = productsAmount > 0 ? Number(((generalDiscountAmount / productsAmount) * 100).toFixed(6)) : 0;
   const requestedFreightPacking = Number(body.freightPacking || 0);
   const freightPacking = Number((Number.isFinite(requestedFreightPacking) ? Math.max(requestedFreightPacking, 0) : 0).toFixed(2));
   return {
@@ -86,7 +99,9 @@ async function normalizeQuotation(body = {}) {
     freightPacking,
     discountPercent,
     discountAmount,
-    amount: Number((items.reduce((total, item) => total + item.lineTotal, 0) + freightPacking).toFixed(2)),
+    generalDiscountPercent,
+    generalDiscountAmount,
+    amount: Number((productsAmount - generalDiscountAmount + freightPacking).toFixed(2)),
     quotationDate: body.quotationDate ? new Date(body.quotationDate) : new Date(),
     status: String(body.status || 'Draft').trim(),
   };
@@ -111,6 +126,32 @@ function leadScope(user, leadId) {
   return isAdmin(user) ? { _id: leadId } : { _id: leadId, assignedTo: user._id };
 }
 
+async function assignLegacyQuotationNumbers() {
+  const unnumbered = await Quotation.find({
+    revisionNumber: 0,
+    $or: [{ serialNumber: { $exists: false } }, { serialNumber: null }],
+  }).populate('createdBy', 'name').sort({ quotationDate: 1, createdAt: 1 }).lean();
+  for (const quotation of unnumbered) {
+    const quotationYear = new Date(quotation.quotationDate || quotation.createdAt).getFullYear();
+    const counter = await QuotationCounter.findOneAndUpdate(
+      { _id: `quotation-${quotationYear}` },
+      { $inc: { sequence: 1 } },
+      { new: true, upsert: true, setDefaultsOnInsert: true },
+    );
+    const creatorInitial = String(quotation.createdBy?.name || 'J').trim().charAt(0).toUpperCase();
+    const result = await Quotation.updateOne(
+      { _id: quotation._id, $or: [{ serialNumber: { $exists: false } }, { serialNumber: null }] },
+      { $set: { quotationYear, serialNumber: counter.sequence, creatorInitial } },
+    );
+    if (result.modifiedCount) {
+      await Quotation.updateMany(
+        { revisionRoot: quotation._id, $or: [{ serialNumber: { $exists: false } }, { serialNumber: null }] },
+        { $set: { quotationYear, serialNumber: counter.sequence, creatorInitial } },
+      );
+    }
+  }
+}
+
 router.get('/summary', async (request, response, next) => {
   try {
     const filter = quotationScope(request.user);
@@ -126,6 +167,7 @@ router.get('/summary', async (request, response, next) => {
 
 router.get('/', async (request, response, next) => {
   try {
+    await assignLegacyQuotationNumbers();
     const filter = quotationScope(request.user);
     const queryConditions = [];
     if (request.query.search?.trim()) {
@@ -173,6 +215,9 @@ router.post('/', async (request, response, next) => {
     let revisedFrom = null;
     let revisionRoot = null;
     let revisionNumber = 0;
+    let quotationYear;
+    let serialNumber;
+    let creatorInitial;
     if (request.body?.revisedFromId) {
       if (!mongoose.Types.ObjectId.isValid(request.body.revisedFromId)) return response.status(400).json({ message: 'Invalid quotation to revise.' });
       const source = await Quotation.findOne({ ...quotationScope(request.user), _id: request.body.revisedFromId, leadId: quotationData.leadId }).lean();
@@ -181,8 +226,20 @@ router.post('/', async (request, response, next) => {
       revisionRoot = source.revisionRoot || source._id;
       const latestRevision = await Quotation.findOne({ ...quotationScope(request.user), revisionRoot }).sort({ revisionNumber: -1 }).select('revisionNumber').lean();
       revisionNumber = Math.max(source.revisionNumber || 0, latestRevision?.revisionNumber || 0) + 1;
+      quotationYear = source.quotationYear || new Date(source.quotationDate || source.createdAt).getFullYear();
+      serialNumber = source.serialNumber;
+      creatorInitial = source.creatorInitial || String(request.user.name || 'J').trim().charAt(0).toUpperCase();
+    } else {
+      quotationYear = quotationData.quotationDate.getFullYear();
+      const counter = await QuotationCounter.findOneAndUpdate(
+        { _id: `quotation-${quotationYear}` },
+        { $inc: { sequence: 1 } },
+        { new: true, upsert: true, setDefaultsOnInsert: true },
+      );
+      serialNumber = counter.sequence;
+      creatorInitial = String(request.user.name || 'J').trim().charAt(0).toUpperCase();
     }
-    const quotation = await Quotation.create({ ...quotationData, revisedFrom, revisionRoot, revisionNumber, createdBy: request.user._id });
+    const quotation = await Quotation.create({ ...quotationData, revisedFrom, revisionRoot, revisionNumber, quotationYear, serialNumber, creatorInitial, createdBy: request.user._id });
     await Lead.updateOne({ _id: lead._id }, { $set: { stage: 'Quotation', status: 'Quotation' } });
     await quotation.populate([{ path: 'createdBy', select: 'name' }, { path: 'leadId', select: 'name company address1 address2 area city state' }]);
     return response.status(201).json({ quotation: serializeQuotation(quotation.toObject()) });
