@@ -9,7 +9,11 @@ const quotationSchema = new mongoose.Schema(
     quotationYear: { type: Number, min: 2000 },
     serialNumber: { type: Number, min: 1 },
     creatorInitial: { type: String, trim: true, uppercase: true, maxlength: 1 },
-    customerName: { type: String, required: true, trim: true, maxlength: 120 },
+    contactName: { type: String, trim: true, maxlength: 120 },
+    // Retained only so quotations created by older builds remain readable.
+    customerName: { type: String, trim: true, maxlength: 120 },
+    contactPersonId: { type: mongoose.Schema.Types.ObjectId, default: null },
+    contactRole: { type: String, trim: true, maxlength: 100 },
     company: { type: String, trim: true, maxlength: 120 },
     email: { type: String, trim: true, lowercase: true, maxlength: 160 },
     phone: { type: String, trim: true, maxlength: 30 },

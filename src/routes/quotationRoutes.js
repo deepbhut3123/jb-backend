@@ -15,7 +15,7 @@ function serializeQuotation(quotation) {
   return {
     _id: quotation._id,
     leadId: quotation.leadId?._id || quotation.leadId,
-    leadName: quotation.leadId?.name || quotation.customerName,
+    leadName: quotation.leadId?.company || quotation.company || '',
     leadAddress: populatedLead ? {
       address1: populatedLead.address1 || '',
       address2: populatedLead.address2 || '',
@@ -29,7 +29,9 @@ function serializeQuotation(quotation) {
     quotationYear: quotation.quotationYear || null,
     serialNumber: quotation.serialNumber || null,
     creatorInitial: quotation.creatorInitial || '',
-    customerName: quotation.customerName,
+    contactName: quotation.contactName || quotation.customerName || '',
+    contactPersonId: quotation.contactPersonId || null,
+    contactRole: quotation.contactRole || '',
     company: quotation.company || '',
     email: quotation.email || '',
     phone: quotation.phone || '',
@@ -90,7 +92,9 @@ async function normalizeQuotation(body = {}) {
   const freightPacking = Number((Number.isFinite(requestedFreightPacking) ? Math.max(requestedFreightPacking, 0) : 0).toFixed(2));
   return {
     leadId: String(body.leadId || '').trim(),
-    customerName: String(body.customerName || '').trim(),
+    contactName: String(body.contactName || body.customerName || '').trim(),
+    contactPersonId: String(body.contactPersonId || '').trim() || null,
+    contactRole: String(body.contactRole || '').trim(),
     company: String(body.company || '').trim(),
     email: String(body.email || '').trim().toLowerCase(),
     phone: String(body.phone || '').trim(),
@@ -109,7 +113,7 @@ async function normalizeQuotation(body = {}) {
 
 function validateQuotation(quotation) {
   if (!mongoose.Types.ObjectId.isValid(quotation.leadId)) return 'Please select a valid lead.';
-  if (!quotation.customerName) return 'Customer name is required.';
+  if (quotation.contactPersonId && !mongoose.Types.ObjectId.isValid(quotation.contactPersonId)) return 'Please select a valid person.';
   if (!quotation.items.length) return 'Please add at least one active product from Product Master.';
   if (Number.isNaN(quotation.quotationDate.getTime())) return 'Please select a valid quotation date.';
   if (!statuses.includes(quotation.status)) return 'Please select a valid quotation status.';
@@ -173,6 +177,7 @@ router.get('/', async (request, response, next) => {
     if (request.query.search?.trim()) {
       const escapedSearch = request.query.search.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       queryConditions.push({ $or: [
+        { contactName: { $regex: escapedSearch, $options: 'i' } },
         { customerName: { $regex: escapedSearch, $options: 'i' } },
         { company: { $regex: escapedSearch, $options: 'i' } },
         { email: { $regex: escapedSearch, $options: 'i' } },
@@ -212,6 +217,7 @@ router.post('/', async (request, response, next) => {
     if (validationError) return response.status(400).json({ message: validationError });
     const lead = await Lead.findOne(leadScope(request.user, quotationData.leadId)).lean();
     if (!lead) return response.status(404).json({ message: 'Lead not found or is not available to you.' });
+    if (quotationData.contactPersonId && !lead.companyPersons?.some((person) => String(person._id) === quotationData.contactPersonId)) return response.status(400).json({ message: 'The selected person does not belong to this lead.' });
     let revisedFrom = null;
     let revisionRoot = null;
     let revisionNumber = 0;
@@ -254,6 +260,7 @@ router.put('/:id', async (request, response, next) => {
     if (validationError) return response.status(400).json({ message: validationError });
     const lead = await Lead.findOne(leadScope(request.user, quotationData.leadId)).lean();
     if (!lead) return response.status(404).json({ message: 'Lead not found or is not available to you.' });
+    if (quotationData.contactPersonId && !lead.companyPersons?.some((person) => String(person._id) === quotationData.contactPersonId)) return response.status(400).json({ message: 'The selected person does not belong to this lead.' });
     const quotation = await Quotation.findOneAndUpdate(filter, quotationData, { new: true, runValidators: true }).populate([{ path: 'createdBy', select: 'name' }, { path: 'leadId', select: 'name company address1 address2 area city state' }]);
     if (!quotation) return response.status(404).json({ message: 'Quotation not found.' });
     return response.json({ quotation: serializeQuotation(quotation.toObject()) });
