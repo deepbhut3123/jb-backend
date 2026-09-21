@@ -7,7 +7,7 @@ router.get('/summary', requireAuth, async (request, response) => {
   response.json({
     user: { name: request.user.name, email: request.user.email, role: request.user.role },
     metrics: [
-      { label: 'Active Customers', value: '—' },
+      { label: 'Active Companies', value: '—' },
       { label: 'Open Enquiries', value: '—' },
       { label: 'Pending Follow-ups', value: '—' },
     ],

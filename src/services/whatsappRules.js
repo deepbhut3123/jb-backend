@@ -35,8 +35,8 @@ export function phoneFromId(id) {
 
 export function leadDefaults(settings, event, whatsappIdentity) {
   return {
-    name: (event.name || 'WhatsApp enquiry').slice(0, 100),
-    phone: event.phone,
+    company: (event.name || 'WhatsApp enquiry').slice(0, 120),
+    companyPersons: [{ name: (event.name || '').slice(0, 100), number: event.phone }],
     whatsappIdentity,
     source: settings.source,
     leadSource: settings.source,

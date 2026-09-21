@@ -62,7 +62,7 @@ export async function processWhatsAppEvent(event) {
       ? event.sender
       : `${event.phone}@c.us`;
     const phonePattern = `^\\+?${event.phone.split('').join('[\\s().-]*')}$`;
-    let lead = await Lead.findOne({ $or: [{ whatsappIdentity: identity }, { phone: { $regex: phonePattern } }] });
+    let lead = await Lead.findOne({ $or: [{ whatsappIdentity: identity }, { 'companyPersons.number': { $regex: phonePattern } }, { phone: { $regex: phonePattern } }] });
     if (lead) {
       event.outcome = 'existing';
     } else {

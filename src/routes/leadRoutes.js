@@ -3,6 +3,7 @@ import Lead from '../models/Lead.js';
 import User from '../models/User.js';
 import { requireAuth } from '../middleware/auth.js';
 import { sendWhatsAppMessage } from '../services/whatsapp.js';
+import { hasInvalidCompanyPersonEmail, normalizeCompanyPersons, serializeCompanyPersons } from '../utils/companyPersons.js';
 
 const router = Router();
 const isAdmin = (user) => [1, 3].includes(user.role);
@@ -13,14 +14,17 @@ function requireAdmin(request, response, next) {
 }
 
 function serializeLead(lead) {
+  const savedPeople = serializeCompanyPersons(lead.companyPersons);
+  const companyPersons = savedPeople.length ? savedPeople : serializeCompanyPersons([{
+    name: lead.name,
+    email: lead.email,
+    number: lead.phone,
+  }]);
   return {
     _id: lead._id,
-    name: lead.name,
-    company: lead.company || 'N/A',
+    company: lead.company || lead.name || 'N/A',
     address1: lead.address1 || '', address2: lead.address2 || '', area: lead.area || '', city: lead.city || '', state: lead.state || '', website: lead.website || '',
-    customerType: lead.customerType || '', segment: lead.segment || '', companyPersons: lead.companyPersons || [], leadSource: lead.leadSource || lead.source || '', stage: lead.stage || lead.status || 'New',
-    email: lead.email || '',
-    phone: lead.phone || '',
+    customerType: lead.customerType || '', segment: lead.segment || '', companyPersons, leadSource: lead.leadSource || lead.source || '', stage: lead.stage || lead.status || 'New',
     whatsappIdentity: lead.whatsappIdentity || '',
     source: lead.leadSource || lead.source || 'Website',
     status: lead.stage || lead.status || 'New',
@@ -49,7 +53,13 @@ router.get('/', requireAuth, async (request, response, next) => {
         { name: { $regex: escapedSearch, $options: 'i' } },
         { company: { $regex: escapedSearch, $options: 'i' } }, { city: { $regex: escapedSearch, $options: 'i' } },
         { email: { $regex: escapedSearch, $options: 'i' } },
-        { phone: { $regex: escapedSearch, $options: 'i' } }, { contactNumber: { $regex: escapedSearch, $options: 'i' } },
+        { phone: { $regex: escapedSearch, $options: 'i' } },
+        { 'companyPersons.name': { $regex: escapedSearch, $options: 'i' } },
+        { 'companyPersons.role': { $regex: escapedSearch, $options: 'i' } },
+        { 'companyPersons.number': { $regex: escapedSearch, $options: 'i' } },
+        { 'companyPersons.email': { $regex: escapedSearch, $options: 'i' } },
+        { 'companyPersons.designation': { $regex: escapedSearch, $options: 'i' } },
+        { 'companyPersons.contactNumber': { $regex: escapedSearch, $options: 'i' } },
       ];
     }
     if (dateFrom || dateTo) {
@@ -73,13 +83,15 @@ router.get('/', requireAuth, async (request, response, next) => {
 
 router.post('/', requireAuth, async (request, response, next) => {
   try {
-    const { name, company, address1, address2, area, city, state, email, website, phone, contactNumber, customerType, segment, companyPersons, leadSource, source, stage, status, priority, nextFollowUp, assignedTo } = request.body || {};
+    const { company, address1, address2, area, city, state, website, customerType, segment, companyPersons, leadSource, source, stage, status, priority, nextFollowUp, assignedTo } = request.body || {};
+    const normalizedCompanyPersons = normalizeCompanyPersons(companyPersons);
+    if (hasInvalidCompanyPersonEmail(normalizedCompanyPersons)) return response.status(400).json({ message: 'Enter a valid email address for each person.' });
     const selectedAssignee = isAdmin(request.user) ? assignedTo : request.user._id;
     if (!selectedAssignee) return response.status(400).json({ message: 'An assigned user is required.' });
     const assignee = await User.findById(selectedAssignee).select('_id name').lean();
     if (!assignee) return response.status(404).json({ message: 'Assigned user was not found.' });
     const followUps = [];
-    const lead = await Lead.create({ name: name?.trim() || '', company: company?.trim(), address1, address2, area, city, state, email, website, phone: contactNumber || phone, customerType, segment, companyPersons, leadSource: leadSource || source || '', source: leadSource || source || '', stage: stage || status || 'New', status: stage || status || 'New', priority: priority || 'Medium', nextFollowUp: nextFollowUp || undefined, followUps, assignedTo: assignee._id, createdBy: request.user._id });
+    const lead = await Lead.create({ company: company?.trim(), address1, address2, area, city, state, website, customerType, segment, companyPersons: normalizedCompanyPersons, leadSource: leadSource || source || '', source: leadSource || source || '', stage: stage || status || 'New', status: stage || status || 'New', priority: priority || 'Medium', nextFollowUp: nextFollowUp || undefined, followUps, assignedTo: assignee._id, createdBy: request.user._id });
     const populated = await lead.populate('assignedTo', 'name');
     return response.status(201).json({ lead: serializeLead(populated.toObject()) });
   } catch (error) { return next(error); }
@@ -90,8 +102,10 @@ router.put('/:id', requireAuth, async (request, response, next) => {
     const lead = await Lead.findById(request.params.id);
     if (!lead) return response.status(404).json({ message: 'Lead not found.' });
     if (!isAdmin(request.user) && lead.assignedTo.toString() !== request.user._id.toString()) return response.status(403).json({ message: 'You can only edit leads assigned to you.' });
-    const { name, company, address1, address2, area, city, state, email, website, phone, contactNumber, customerType, segment, companyPersons, leadSource, source, stage, status, priority, nextFollowUp, assignedTo } = request.body || {};
-    Object.assign(lead, { name: name?.trim() || '', company: company?.trim(), address1, address2, area, city, state, email, website, phone: contactNumber || phone, customerType, segment, companyPersons, leadSource: leadSource || source || '', source: leadSource || source || '', stage: stage || status || 'New', status: stage || status || 'New', priority: priority || 'Medium', nextFollowUp: nextFollowUp || undefined });
+    const { company, address1, address2, area, city, state, website, customerType, segment, companyPersons, leadSource, source, stage, status, priority, nextFollowUp, assignedTo } = request.body || {};
+    const normalizedCompanyPersons = normalizeCompanyPersons(companyPersons);
+    if (hasInvalidCompanyPersonEmail(normalizedCompanyPersons)) return response.status(400).json({ message: 'Enter a valid email address for each person.' });
+    Object.assign(lead, { name: undefined, email: undefined, phone: undefined, company: company?.trim(), address1, address2, area, city, state, website, customerType, segment, companyPersons: normalizedCompanyPersons, leadSource: leadSource || source || '', source: leadSource || source || '', stage: stage || status || 'New', status: stage || status || 'New', priority: priority || 'Medium', nextFollowUp: nextFollowUp || undefined });
     if (isAdmin(request.user) && assignedTo) lead.assignedTo = assignedTo;
     await lead.save();
     const populated = await lead.populate('assignedTo', 'name');
