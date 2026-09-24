@@ -61,7 +61,7 @@ async function normalizeQuotation(body = {}) {
     const product = productMap.get(String(item.productId));
     const quantity = Number(item.quantity);
     if (!product || !Number.isFinite(quantity) || quantity <= 0) return null;
-    const unitPrice = Number(product.mrp ?? product.salePrice);
+    const unitPrice = Number(product.finalRate ?? product.mrp ?? product.salePrice);
     if (!Number.isFinite(unitPrice) || unitPrice < 0) return null;
     const lineSubtotal = Number((quantity * unitPrice).toFixed(2));
     const usesDiscountAmount = item.discountMode === 'amount';
