@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import multer from 'multer';
 import Product from '../models/Product.js';
 import { requireAuth } from '../middleware/auth.js';
+import ProductPricingSettings from '../models/ProductPricingSettings.js';
 
 const router = Router();
 const taxRates = [0, 5, 12, 18, 28];
@@ -36,6 +37,14 @@ function requireAdmin(request, response, next) {
 }
 
 function normalizeProduct(body = {}, imageFile) {
+  const hasDollarAmount = body.dollarAmount !== '' && body.dollarAmount != null;
+  const dollarAmount = hasDollarAmount ? Number(body.dollarAmount) : 0;
+  const dollarRate = body.dollarRate === '' || body.dollarRate == null ? 1 : Number(body.dollarRate);
+  const marginPercent = body.marginPercent === '' || body.marginPercent == null ? 0 : Number(body.marginPercent);
+  const priceMultiplier = body.priceMultiplier === '' || body.priceMultiplier == null ? 1 : Number(body.priceMultiplier);
+  const convertedAmount = Number.isFinite(dollarAmount * dollarRate) ? Number((dollarAmount * dollarRate).toFixed(2)) : Number.NaN;
+  const legacyMrp = body.mrp === '' || body.mrp == null ? Number.NaN : Number(body.mrp);
+  const finalRate = !hasDollarAmount && Number.isFinite(legacyMrp) ? legacyMrp : (Number.isFinite(convertedAmount) ? Number((convertedAmount * (1 + marginPercent / 100) * priceMultiplier).toFixed(2)) : Number.NaN);
   return {
     name: String(body.name || body.description || '').trim(),
     partCode: String(body.partCode || body.code || '').trim().toUpperCase(),
@@ -48,14 +57,17 @@ function normalizeProduct(body = {}, imageFile) {
     image: imageFile ? `/public/products/${imageFile.filename}` : String(body.image || '').trim(),
     taxRate: body.taxRate === '' || body.taxRate == null ? Number.NaN : Number(body.taxRate),
     hsnCode: String(body.hsnCode || '').trim(),
-    mrp: body.mrp === '' || body.mrp == null ? Number.NaN : Number(body.mrp),
+    // Keep the legacy MRP field synchronized so older tables and integrations use the finalized rate.
+    mrp: finalRate,
+    dollarAmount, convertedAmount, finalRate, dollarRate, marginPercent, priceMultiplier,
     isActive: body.isActive !== false,
   };
 }
 
 function validateProduct(product) {
   if (!product.partCode || !product.description || !product.category) return 'Part code, description, and category are required.';
-  if (!Number.isFinite(product.mrp) || product.mrp < 0) return 'MRP must be a valid non-negative number.';
+  if (!Number.isFinite(product.mrp) || product.mrp < 0) return 'Price must be a valid non-negative number.';
+  if (![product.dollarAmount, product.convertedAmount, product.finalRate, product.dollarRate, product.marginPercent, product.priceMultiplier].every((number) => Number.isFinite(number) && number >= 0)) return 'Pricing values must be valid non-negative numbers.';
   if (!taxRates.includes(product.taxRate)) return 'Please select a valid GST rate.';
   return null;
 }
@@ -79,7 +91,8 @@ router.use(requireAdmin);
 
 router.post('/', uploadProductImage.single('image'), async (request, response, next) => {
   try {
-    const productData = normalizeProduct(request.body, request.file);
+    const settings = await ProductPricingSettings.findOne({ key: 'product-pricing' }).lean();
+    const productData = normalizeProduct({ ...(settings || {}), ...request.body, dollarRate: request.body.dollarRate ?? settings?.dollarRate, marginPercent: request.body.marginPercent ?? 0, priceMultiplier: request.body.priceMultiplier ?? settings?.multiplier }, request.file);
     const validationError = validateProduct(productData);
     if (validationError) return response.status(400).json({ message: validationError });
     if (await Product.exists({ $or: [{ partCode: productData.partCode }, { code: productData.partCode }] })) return response.status(409).json({ message: 'A product with this part code already exists.' });
@@ -92,7 +105,8 @@ router.put('/:id', uploadProductImage.single('image'), async (request, response,
   try {
     const existingProduct = await Product.findById(request.params.id).lean();
     if (!existingProduct) return response.status(404).json({ message: 'Product not found.' });
-    const productData = normalizeProduct({ ...existingProduct, ...request.body }, request.file);
+    const settings = await ProductPricingSettings.findOne({ key: 'product-pricing' }).lean();
+    const productData = normalizeProduct({ ...existingProduct, ...(settings || {}), ...request.body, dollarRate: request.body.dollarRate ?? existingProduct.dollarRate ?? settings?.dollarRate, marginPercent: request.body.marginPercent ?? existingProduct.marginPercent ?? 0, priceMultiplier: request.body.priceMultiplier ?? existingProduct.priceMultiplier ?? settings?.multiplier }, request.file);
     const validationError = validateProduct(productData);
     if (validationError) return response.status(400).json({ message: validationError });
     if (await Product.exists({ $or: [{ partCode: productData.partCode }, { code: productData.partCode }], _id: { $ne: request.params.id } })) return response.status(409).json({ message: 'A product with this part code already exists.' });
