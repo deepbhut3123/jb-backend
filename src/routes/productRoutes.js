@@ -31,6 +31,15 @@ const uploadProductImage = multer({
   },
 });
 
+async function removeStoredProductImage(image) {
+  if (!String(image || '').startsWith('/public/products/')) return;
+  const filename = path.basename(image);
+  const target = path.join(productImageDirectory, filename);
+  if (path.dirname(target) !== productImageDirectory) return;
+  try { await fs.promises.unlink(target); }
+  catch (error) { if (error.code !== 'ENOENT') throw error; }
+}
+
 function requireAdmin(request, response, next) {
   if (![1, 3].includes(request.user.role)) return response.status(403).json({ message: 'Only administrators can manage Product Master.' });
   return next();
@@ -111,6 +120,7 @@ router.put('/:id', uploadProductImage.single('image'), async (request, response,
     if (validationError) return response.status(400).json({ message: validationError });
     if (await Product.exists({ $or: [{ partCode: productData.partCode }, { code: productData.partCode }], _id: { $ne: request.params.id } })) return response.status(409).json({ message: 'A product with this part code already exists.' });
     const product = await Product.findByIdAndUpdate(request.params.id, productData, { new: true, runValidators: true });
+    if (existingProduct.image && existingProduct.image !== product.image) await removeStoredProductImage(existingProduct.image);
     return response.json({ product });
   } catch (error) { return next(error); }
 });
@@ -119,6 +129,7 @@ router.delete('/:id', async (request, response, next) => {
   try {
     const product = await Product.findByIdAndDelete(request.params.id);
     if (!product) return response.status(404).json({ message: 'Product not found.' });
+    await removeStoredProductImage(product.image);
     return response.json({ message: 'Product deleted successfully.' });
   } catch (error) { return next(error); }
 });
