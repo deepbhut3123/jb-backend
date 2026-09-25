@@ -14,6 +14,7 @@ import leadOptionRoutes from './routes/leadOptionRoutes.js';
 import categoryRoutes from './routes/categoryRoutes.js';
 import whatsappRoutes from './routes/whatsappRoutes.js';
 import pricingSettingsRoutes from './routes/pricingSettingsRoutes.js';
+import searchRoutes from './routes/searchRoutes.js';
 import { startWhatsAppService, stopWhatsAppService } from './services/whatsapp.js';
 
 dotenv.config();
@@ -66,6 +67,7 @@ app.use('/api/lead-options', leadOptionRoutes);
 app.use('/api/categories', categoryRoutes);
 app.use('/api/whatsapp', whatsappRoutes);
 app.use('/api/pricing-settings', pricingSettingsRoutes);
+app.use('/api/search', searchRoutes);
 
 app.get('/api/health', (_request, response) => {
   response.json({
