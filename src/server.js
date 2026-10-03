@@ -15,6 +15,7 @@ import categoryRoutes from './routes/categoryRoutes.js';
 import whatsappRoutes from './routes/whatsappRoutes.js';
 import pricingSettingsRoutes from './routes/pricingSettingsRoutes.js';
 import searchRoutes from './routes/searchRoutes.js';
+import profileRoutes from './routes/profileRoutes.js';
 import { startWhatsAppService, stopWhatsAppService } from './services/whatsapp.js';
 
 dotenv.config();
@@ -68,6 +69,7 @@ app.use('/api/categories', categoryRoutes);
 app.use('/api/whatsapp', whatsappRoutes);
 app.use('/api/pricing-settings', pricingSettingsRoutes);
 app.use('/api/search', searchRoutes);
+app.use('/api/profile', profileRoutes);
 
 app.get('/api/health', (_request, response) => {
   response.json({
