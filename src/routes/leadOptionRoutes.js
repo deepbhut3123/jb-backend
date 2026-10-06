@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import LeadOption from '../models/LeadOption.js';
-import { requireAuth } from '../middleware/auth.js';
+import { requireAuth, requirePermission } from '../middleware/auth.js';
 
 const router = Router();
 const types = ['customerType', 'segment', 'leadSource'];
@@ -13,14 +13,14 @@ function requireAdmin(request, response, next) {
 
 router.use(requireAuth);
 
-router.get('/', async (_request, response, next) => {
+router.get('/', requirePermission('leads.view'), async (_request, response, next) => {
   try {
     const options = await LeadOption.find().sort({ type: 1, value: 1 }).lean();
     return response.json({ options });
   } catch (error) { return next(error); }
 });
 
-router.post('/', requireAdmin, async (request, response, next) => {
+router.post('/', requirePermission('leads.create'), async (request, response, next) => {
   try {
     const type = String(request.body?.type || '').trim();
     const value = String(request.body?.value || '').trim();
@@ -33,7 +33,7 @@ router.post('/', requireAdmin, async (request, response, next) => {
   }
 });
 
-router.put('/:id', requireAdmin, async (request, response, next) => {
+router.put('/:id', requirePermission('leads.edit'), async (request, response, next) => {
   try {
     const value = String(request.body?.value || '').trim();
     if (!value) return response.status(400).json({ message: 'Dropdown value is required.' });
@@ -46,7 +46,7 @@ router.put('/:id', requireAdmin, async (request, response, next) => {
   }
 });
 
-router.delete('/:id', requireAdmin, async (request, response, next) => {
+router.delete('/:id', requirePermission('leads.delete'), async (request, response, next) => {
   try {
     const option = await LeadOption.findByIdAndDelete(request.params.id);
     if (!option) return response.status(404).json({ message: 'Dropdown value not found.' });

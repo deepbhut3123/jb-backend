@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import Category from '../models/Category.js';
-import { requireAuth } from '../middleware/auth.js';
+import { requireAuth, requireAnyPermission, requirePermission } from '../middleware/auth.js';
 
 const router = Router();
 const isAdmin = (user) => [1, 3].includes(user.role);
@@ -14,14 +14,14 @@ function cleanName(value) { return String(value || '').trim(); }
 
 router.use(requireAuth);
 
-router.get('/', async (_request, response, next) => {
+router.get('/', requireAnyPermission('categories.view', 'products.view', 'quotations.view'), async (_request, response, next) => {
   try {
     const categories = await Category.find().sort({ name: 1 }).lean();
     return response.json({ categories });
   } catch (error) { return next(error); }
 });
 
-router.post('/', requireAdmin, async (request, response, next) => {
+router.post('/', requirePermission('categories.create'), async (request, response, next) => {
   try {
     const name = cleanName(request.body?.name);
     if (!name) return response.status(400).json({ message: 'Category name is required.' });
@@ -33,7 +33,7 @@ router.post('/', requireAdmin, async (request, response, next) => {
   }
 });
 
-router.put('/:id', requireAdmin, async (request, response, next) => {
+router.put('/:id', requirePermission('categories.edit'), async (request, response, next) => {
   try {
     const name = cleanName(request.body?.name);
     if (!name) return response.status(400).json({ message: 'Category name is required.' });
@@ -46,7 +46,7 @@ router.put('/:id', requireAdmin, async (request, response, next) => {
   }
 });
 
-router.delete('/:id', requireAdmin, async (request, response, next) => {
+router.delete('/:id', requirePermission('categories.delete'), async (request, response, next) => {
   try {
     const category = await Category.findByIdAndDelete(request.params.id);
     if (!category) return response.status(404).json({ message: 'Category not found.' });
@@ -54,7 +54,7 @@ router.delete('/:id', requireAdmin, async (request, response, next) => {
   } catch (error) { return next(error); }
 });
 
-router.post('/:id/subcategories', requireAdmin, async (request, response, next) => {
+router.post('/:id/subcategories', requirePermission('categories.create'), async (request, response, next) => {
   try {
     const name = cleanName(request.body?.name);
     if (!name) return response.status(400).json({ message: 'Sub category name is required.' });
@@ -67,7 +67,7 @@ router.post('/:id/subcategories', requireAdmin, async (request, response, next) 
   } catch (error) { return next(error); }
 });
 
-router.put('/:id/subcategories/:subCategoryId', requireAdmin, async (request, response, next) => {
+router.put('/:id/subcategories/:subCategoryId', requirePermission('categories.edit'), async (request, response, next) => {
   try {
     const name = cleanName(request.body?.name);
     if (!name) return response.status(400).json({ message: 'Sub category name is required.' });
@@ -82,7 +82,7 @@ router.put('/:id/subcategories/:subCategoryId', requireAdmin, async (request, re
   } catch (error) { return next(error); }
 });
 
-router.delete('/:id/subcategories/:subCategoryId', requireAdmin, async (request, response, next) => {
+router.delete('/:id/subcategories/:subCategoryId', requirePermission('categories.delete'), async (request, response, next) => {
   try {
     const category = await Category.findById(request.params.id);
     if (!category) return response.status(404).json({ message: 'Category not found.' });
@@ -94,7 +94,7 @@ router.delete('/:id/subcategories/:subCategoryId', requireAdmin, async (request,
   } catch (error) { return next(error); }
 });
 
-router.post('/:id/subcategories/:subCategoryId/subsubcategories', requireAdmin, async (request, response, next) => {
+router.post('/:id/subcategories/:subCategoryId/subsubcategories', requirePermission('categories.create'), async (request, response, next) => {
   try {
     const name = cleanName(request.body?.name);
     if (!name) return response.status(400).json({ message: 'Sub-sub category name is required.' });
@@ -109,7 +109,7 @@ router.post('/:id/subcategories/:subCategoryId/subsubcategories', requireAdmin, 
   } catch (error) { return next(error); }
 });
 
-router.put('/:id/subcategories/:subCategoryId/subsubcategories/:subSubCategoryId', requireAdmin, async (request, response, next) => {
+router.put('/:id/subcategories/:subCategoryId/subsubcategories/:subSubCategoryId', requirePermission('categories.edit'), async (request, response, next) => {
   try {
     const name = cleanName(request.body?.name);
     if (!name) return response.status(400).json({ message: 'Sub-sub category name is required.' });
@@ -126,7 +126,7 @@ router.put('/:id/subcategories/:subCategoryId/subsubcategories/:subSubCategoryId
   } catch (error) { return next(error); }
 });
 
-router.delete('/:id/subcategories/:subCategoryId/subsubcategories/:subSubCategoryId', requireAdmin, async (request, response, next) => {
+router.delete('/:id/subcategories/:subCategoryId/subsubcategories/:subSubCategoryId', requirePermission('categories.delete'), async (request, response, next) => {
   try {
     const category = await Category.findById(request.params.id);
     if (!category) return response.status(404).json({ message: 'Category not found.' });

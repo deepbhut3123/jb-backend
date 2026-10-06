@@ -4,7 +4,7 @@ import Quotation from '../models/Quotation.js';
 import QuotationCounter from '../models/QuotationCounter.js';
 import Product from '../models/Product.js';
 import Lead from '../models/Lead.js';
-import { requireAuth } from '../middleware/auth.js';
+import { requireAuth, requirePermission } from '../middleware/auth.js';
 
 const router = Router();
 const isAdmin = (user) => [1, 3].includes(user.role);
@@ -122,12 +122,14 @@ function validateQuotation(quotation) {
 
 router.use(requireAuth);
 
-function quotationScope(user) {
-  return isAdmin(user) ? {} : { createdBy: user._id };
+function quotationScope(request) {
+  return isAdmin(request.user) || request.permissions?.includes('quotations.viewAll') ? {} : { createdBy: request.user._id };
 }
 
-function leadScope(user, leadId) {
-  return isAdmin(user) ? { _id: leadId } : { _id: leadId, assignedTo: user._id };
+function leadScope(request, leadId) {
+  return isAdmin(request.user) || request.permissions?.includes('leads.viewAll') || request.permissions?.includes('quotations.viewAll')
+    ? { _id: leadId }
+    : { _id: leadId, assignedTo: request.user._id };
 }
 
 async function assignLegacyQuotationNumbers() {
@@ -156,9 +158,9 @@ async function assignLegacyQuotationNumbers() {
   }
 }
 
-router.get('/summary', async (request, response, next) => {
+router.get('/summary', requirePermission('quotations.view'), async (request, response, next) => {
   try {
-    const filter = quotationScope(request.user);
+    const filter = quotationScope(request);
     const [total, sent, draft, revisions] = await Promise.all([
       Quotation.countDocuments(filter),
       Quotation.countDocuments({ ...filter, status: 'Sent' }),
@@ -169,10 +171,10 @@ router.get('/summary', async (request, response, next) => {
   } catch (error) { return next(error); }
 });
 
-router.get('/', async (request, response, next) => {
+router.get('/', requirePermission('quotations.view'), async (request, response, next) => {
   try {
     await assignLegacyQuotationNumbers();
-    const filter = quotationScope(request.user);
+    const filter = quotationScope(request);
     const queryConditions = [];
     if (request.query.search?.trim()) {
       const escapedSearch = request.query.search.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -210,12 +212,12 @@ router.get('/', async (request, response, next) => {
   } catch (error) { return next(error); }
 });
 
-router.post('/', async (request, response, next) => {
+router.post('/', requirePermission('quotations.create'), async (request, response, next) => {
   try {
     const quotationData = await normalizeQuotation(request.body);
     const validationError = validateQuotation(quotationData);
     if (validationError) return response.status(400).json({ message: validationError });
-    const lead = await Lead.findOne(leadScope(request.user, quotationData.leadId)).lean();
+    const lead = await Lead.findOne(leadScope(request, quotationData.leadId)).lean();
     if (!lead) return response.status(404).json({ message: 'Lead not found or is not available to you.' });
     if (quotationData.contactPersonId && !lead.companyPersons?.some((person) => String(person._id) === quotationData.contactPersonId)) return response.status(400).json({ message: 'The selected person does not belong to this lead.' });
     let revisedFrom = null;
@@ -226,11 +228,11 @@ router.post('/', async (request, response, next) => {
     let creatorInitial;
     if (request.body?.revisedFromId) {
       if (!mongoose.Types.ObjectId.isValid(request.body.revisedFromId)) return response.status(400).json({ message: 'Invalid quotation to revise.' });
-      const source = await Quotation.findOne({ ...quotationScope(request.user), _id: request.body.revisedFromId, leadId: quotationData.leadId }).lean();
+      const source = await Quotation.findOne({ ...quotationScope(request), _id: request.body.revisedFromId, leadId: quotationData.leadId }).lean();
       if (!source) return response.status(404).json({ message: 'The original quotation was not found for this lead.' });
       revisedFrom = source._id;
       revisionRoot = source.revisionRoot || source._id;
-      const latestRevision = await Quotation.findOne({ ...quotationScope(request.user), revisionRoot }).sort({ revisionNumber: -1 }).select('revisionNumber').lean();
+      const latestRevision = await Quotation.findOne({ ...quotationScope(request), revisionRoot }).sort({ revisionNumber: -1 }).select('revisionNumber').lean();
       revisionNumber = Math.max(source.revisionNumber || 0, latestRevision?.revisionNumber || 0) + 1;
       quotationYear = source.quotationYear || new Date(source.quotationDate || source.createdAt).getFullYear();
       serialNumber = source.serialNumber;
@@ -252,13 +254,13 @@ router.post('/', async (request, response, next) => {
   } catch (error) { return next(error); }
 });
 
-router.put('/:id', async (request, response, next) => {
+router.put('/:id', requirePermission('quotations.edit'), async (request, response, next) => {
   try {
-    const filter = isAdmin(request.user) ? { _id: request.params.id } : { _id: request.params.id, createdBy: request.user._id };
+    const filter = { ...quotationScope(request), _id: request.params.id };
     const quotationData = await normalizeQuotation(request.body);
     const validationError = validateQuotation(quotationData);
     if (validationError) return response.status(400).json({ message: validationError });
-    const lead = await Lead.findOne(leadScope(request.user, quotationData.leadId)).lean();
+    const lead = await Lead.findOne(leadScope(request, quotationData.leadId)).lean();
     if (!lead) return response.status(404).json({ message: 'Lead not found or is not available to you.' });
     if (quotationData.contactPersonId && !lead.companyPersons?.some((person) => String(person._id) === quotationData.contactPersonId)) return response.status(400).json({ message: 'The selected person does not belong to this lead.' });
     const quotation = await Quotation.findOneAndUpdate(filter, quotationData, { new: true, runValidators: true }).populate([{ path: 'createdBy', select: 'name' }, { path: 'leadId', select: 'name company address1 address2 area city state' }]);
@@ -271,16 +273,17 @@ router.patch('/:id/status', async (request, response, next) => {
   try {
     const status = request.body?.status;
     if (!statuses.includes(status)) return response.status(400).json({ message: 'Please select a valid quotation status.' });
-    const filter = isAdmin(request.user) ? { _id: request.params.id } : { _id: request.params.id, createdBy: request.user._id };
+    if (Array.isArray(request.permissions) && !request.permissions.includes('quotations.edit')) return response.status(403).json({ message: 'You do not have permission to edit quotations.' });
+    const filter = { ...quotationScope(request), _id: request.params.id };
     const quotation = await Quotation.findOneAndUpdate(filter, { $set: { status } }, { new: true, runValidators: true }).populate([{ path: 'createdBy', select: 'name' }, { path: 'leadId', select: 'name company address1 address2 area city state' }]);
     if (!quotation) return response.status(404).json({ message: 'Quotation not found.' });
     return response.json({ quotation: serializeQuotation(quotation.toObject()) });
   } catch (error) { return next(error); }
 });
 
-router.delete('/:id', async (request, response, next) => {
+router.delete('/:id', requirePermission('quotations.delete'), async (request, response, next) => {
   try {
-    const filter = isAdmin(request.user) ? { _id: request.params.id } : { _id: request.params.id, createdBy: request.user._id };
+    const filter = { ...quotationScope(request), _id: request.params.id };
     const quotation = await Quotation.findOneAndDelete(filter);
     if (!quotation) return response.status(404).json({ message: 'Quotation not found.' });
     return response.json({ message: 'Quotation deleted successfully.' });

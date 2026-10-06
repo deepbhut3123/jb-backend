@@ -7,6 +7,7 @@ const userSchema = new mongoose.Schema(
     phone: { type: String, trim: true, maxlength: 30 },
     passwordHash: { type: String, required: true, select: false },
     role: { type: Number, default: 2, enum: [1, 2, 3] },
+    roleProfile: { type: mongoose.Schema.Types.ObjectId, ref: 'Role', default: null },
     isVerified: { type: Boolean, default: true },
   },
   { timestamps: true },

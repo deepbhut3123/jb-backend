@@ -5,6 +5,8 @@ import { Router } from 'express';
 import Otp from '../models/Otp.js';
 import User from '../models/User.js';
 import { sendOtpEmail } from '../utils/mailer.js';
+import { effectivePermissions, isAdministrator } from '../config/permissions.js';
+import { requireAuth } from '../middleware/auth.js';
 
 const router = Router();
 const otpMinutes = () => Number(process.env.OTP_EXPIRY_MINUTES || 10);
@@ -54,9 +56,10 @@ router.post('/register/verify', async (request, response, next) => {
 router.post('/login', async (request, response, next) => {
   try {
     const email = normalizeEmail(request.body.email);
-    const user = await User.findOne({ email }).select('+passwordHash');
+    const user = await User.findOne({ email }).select('+passwordHash').populate('roleProfile', 'name permissions isActive');
     if (!user || !(await bcrypt.compare(request.body.password || '', user.passwordHash))) return response.status(401).json({ message: 'Email or password is incorrect.' });
-    return response.json({ token: issueToken(user), user: { id: user._id, name: user.name, email: user.email, role: user.role } });
+    if (user.roleProfile && !user.roleProfile.isActive && !isAdministrator(user)) return response.status(403).json({ message: 'Your assigned role is inactive. Contact an administrator.' });
+    return response.json({ token: issueToken(user), user: { id: user._id, name: user.name, email: user.email, role: user.role, roleProfile: user.roleProfile ? { id: user.roleProfile._id, name: user.roleProfile.name } : null, permissions: effectivePermissions(user) } });
   } catch (error) { return next(error); }
 });
 
@@ -96,5 +99,16 @@ router.post('/forgot-password/reset', async (request, response, next) => {
     return response.json({ message: 'Password reset successfully. You can now log in.' });
   } catch (error) { return next(error); }
 });
+
+router.get('/session', requireAuth, (request, response) => response.json({
+  user: {
+    id: request.user._id,
+    name: request.user.name,
+    email: request.user.email,
+    role: request.user.role,
+    roleProfile: request.user.roleProfile ? { id: request.user.roleProfile._id, name: request.user.roleProfile.name } : null,
+    permissions: request.permissions,
+  },
+}));
 
 export default router;

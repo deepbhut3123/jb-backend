@@ -1,12 +1,13 @@
 import { Router } from 'express';
 import Lead from '../models/Lead.js';
 import User from '../models/User.js';
-import { requireAuth } from '../middleware/auth.js';
+import { requireAuth, requireAnyPermission } from '../middleware/auth.js';
 import { sendWhatsAppMessage } from '../services/whatsapp.js';
 import { hasInvalidCompanyPersonEmail, normalizeCompanyPersons, serializeCompanyPersons } from '../utils/companyPersons.js';
 
 const router = Router();
 const isAdmin = (user) => [1, 3].includes(user.role);
+const canViewAll = (request, module) => isAdmin(request.user) || request.permissions?.includes(`${module}.viewAll`);
 
 function requireAdmin(request, response, next) {
   if (!isAdmin(request.user)) return response.status(403).json({ message: 'Only administrators can manage leads.' });
@@ -38,12 +39,14 @@ function serializeLead(lead) {
   };
 }
 
-router.get('/', requireAuth, async (request, response, next) => {
+router.get('/', requireAuth, requireAnyPermission('leads.view', 'customers.view', 'quotations.view'), async (request, response, next) => {
   try {
     const { status, search, dateFrom, dateTo } = request.query;
     const page = Math.max(Number.parseInt(request.query.page, 10) || 1, 1);
     const limit = Math.min(Math.max(Number.parseInt(request.query.limit, 10) || 20, 1), 100);
-    const filter = isAdmin(request.user) ? {} : { assignedTo: request.user._id };
+    const isLeadOrCustomerView = request.permissions?.includes('leads.view') || request.permissions?.includes('customers.view');
+    const hasTeamScope = canViewAll(request, 'leads') || canViewAll(request, 'customers');
+    const filter = hasTeamScope ? {} : isLeadOrCustomerView ? { createdBy: request.user._id } : { assignedTo: request.user._id };
     const validStatuses = ['New', 'Quotation', 'Followup', 'Performa-Invoice', 'Done', 'Lost'];
 
     if (status && status !== 'All' && validStatuses.includes(status)) filter.status = status;
@@ -75,13 +78,13 @@ router.get('/', requireAuth, async (request, response, next) => {
     ]);
     return response.json({
       leads: leads.map(serializeLead),
-      scope: isAdmin(request.user) ? 'all' : 'assigned',
+      scope: hasTeamScope ? 'all-users' : isLeadOrCustomerView ? 'own' : 'assigned',
       pagination: { page, limit, total, totalPages: Math.max(Math.ceil(total / limit), 1) },
     });
   } catch (error) { return next(error); }
 });
 
-router.post('/', requireAuth, async (request, response, next) => {
+router.post('/', requireAuth, requireAnyPermission('leads.create'), async (request, response, next) => {
   try {
     const { company, address1, address2, area, city, state, website, customerType, segment, companyPersons, leadSource, source, stage, status, priority, nextFollowUp, assignedTo } = request.body || {};
     const normalizedCompanyPersons = normalizeCompanyPersons(companyPersons);
@@ -97,11 +100,11 @@ router.post('/', requireAuth, async (request, response, next) => {
   } catch (error) { return next(error); }
 });
 
-router.put('/:id', requireAuth, async (request, response, next) => {
+router.put('/:id', requireAuth, requireAnyPermission('leads.edit'), async (request, response, next) => {
   try {
     const lead = await Lead.findById(request.params.id);
     if (!lead) return response.status(404).json({ message: 'Lead not found.' });
-    if (!isAdmin(request.user) && lead.assignedTo.toString() !== request.user._id.toString()) return response.status(403).json({ message: 'You can only edit leads assigned to you.' });
+    if (!canViewAll(request, 'leads') && lead.createdBy?.toString() !== request.user._id.toString()) return response.status(403).json({ message: 'You can only edit leads added by you.' });
     const { company, address1, address2, area, city, state, website, customerType, segment, companyPersons, leadSource, source, stage, status, priority, nextFollowUp, assignedTo } = request.body || {};
     const normalizedCompanyPersons = normalizeCompanyPersons(companyPersons);
     if (hasInvalidCompanyPersonEmail(normalizedCompanyPersons)) return response.status(400).json({ message: 'Enter a valid email address for each person.' });
@@ -113,24 +116,71 @@ router.put('/:id', requireAuth, async (request, response, next) => {
   } catch (error) { return next(error); }
 });
 
-router.delete('/:id', requireAuth, async (request, response, next) => {
+router.delete('/:id', requireAuth, requireAnyPermission('leads.delete'), async (request, response, next) => {
   try {
     const lead = await Lead.findById(request.params.id);
     if (!lead) return response.status(404).json({ message: 'Lead not found.' });
-    if (!isAdmin(request.user) && lead.assignedTo.toString() !== request.user._id.toString()) return response.status(403).json({ message: 'You can only delete leads assigned to you.' });
+    if (!canViewAll(request, 'leads') && lead.createdBy?.toString() !== request.user._id.toString()) return response.status(403).json({ message: 'You can only delete leads added by you.' });
     await lead.deleteOne();
     return response.json({ message: 'Lead deleted successfully.' });
   } catch (error) { return next(error); }
 });
 
-async function getAccessibleLead(request, id) {
+async function getAccessibleLead(request, id, module = 'leads') {
   const lead = await Lead.findById(id);
   if (!lead) return { error: 'Lead not found.', status: 404 };
-  if (!isAdmin(request.user) && lead.assignedTo.toString() !== request.user._id.toString()) return { error: 'You can only manage follow-ups for leads assigned to you.', status: 403 };
+  if (!canViewAll(request, module) && lead.createdBy?.toString() !== request.user._id.toString()) return { error: `You can only manage ${module} data added by you.`, status: 403 };
   return { lead };
 }
 
-router.post('/:id/followups', requireAuth, async (request, response, next) => {
+function customerDetails(body) {
+  return normalizeCompanyPersons([body || {}])[0] || null;
+}
+
+router.post('/:id/customers', requireAuth, requireAnyPermission('customers.create'), async (request, response, next) => {
+  try {
+    const result = await getAccessibleLead(request, request.params.id, 'customers');
+    if (result.error) return response.status(result.status).json({ message: result.error });
+    const customer = customerDetails(request.body);
+    if (!customer) return response.status(400).json({ message: 'Enter at least one customer detail.' });
+    if (hasInvalidCompanyPersonEmail([customer])) return response.status(400).json({ message: 'Enter a valid customer email address.' });
+    result.lead.companyPersons.push(customer);
+    await result.lead.save();
+    const populated = await result.lead.populate('assignedTo', 'name');
+    return response.status(201).json({ lead: serializeLead(populated.toObject()) });
+  } catch (error) { return next(error); }
+});
+
+router.put('/:id/customers/:customerId', requireAuth, requireAnyPermission('customers.edit'), async (request, response, next) => {
+  try {
+    const result = await getAccessibleLead(request, request.params.id, 'customers');
+    if (result.error) return response.status(result.status).json({ message: result.error });
+    const customer = result.lead.companyPersons.id(request.params.customerId);
+    if (!customer) return response.status(404).json({ message: 'Customer not found.' });
+    const details = customerDetails(request.body);
+    if (!details) return response.status(400).json({ message: 'Enter at least one customer detail.' });
+    if (hasInvalidCompanyPersonEmail([details])) return response.status(400).json({ message: 'Enter a valid customer email address.' });
+    Object.assign(customer, details);
+    await result.lead.save();
+    const populated = await result.lead.populate('assignedTo', 'name');
+    return response.json({ lead: serializeLead(populated.toObject()) });
+  } catch (error) { return next(error); }
+});
+
+router.delete('/:id/customers/:customerId', requireAuth, requireAnyPermission('customers.delete'), async (request, response, next) => {
+  try {
+    const result = await getAccessibleLead(request, request.params.id, 'customers');
+    if (result.error) return response.status(result.status).json({ message: result.error });
+    const customer = result.lead.companyPersons.id(request.params.customerId);
+    if (!customer) return response.status(404).json({ message: 'Customer not found.' });
+    customer.deleteOne();
+    await result.lead.save();
+    const populated = await result.lead.populate('assignedTo', 'name');
+    return response.json({ lead: serializeLead(populated.toObject()) });
+  } catch (error) { return next(error); }
+});
+
+router.post('/:id/followups', requireAuth, requireAnyPermission('leads.create'), async (request, response, next) => {
   try {
     const result = await getAccessibleLead(request, request.params.id);
     if (result.error) return response.status(result.status).json({ message: result.error });
@@ -144,7 +194,7 @@ router.post('/:id/followups', requireAuth, async (request, response, next) => {
   } catch (error) { return next(error); }
 });
 
-router.put('/:id/followups/:followUpId', requireAuth, async (request, response, next) => {
+router.put('/:id/followups/:followUpId', requireAuth, requireAnyPermission('leads.edit'), async (request, response, next) => {
   try {
     const result = await getAccessibleLead(request, request.params.id);
     if (result.error) return response.status(result.status).json({ message: result.error });
@@ -162,7 +212,7 @@ router.put('/:id/followups/:followUpId', requireAuth, async (request, response, 
   } catch (error) { return next(error); }
 });
 
-router.delete('/:id/followups/:followUpId', requireAuth, async (request, response, next) => {
+router.delete('/:id/followups/:followUpId', requireAuth, requireAnyPermission('leads.delete'), async (request, response, next) => {
   try {
     const result = await getAccessibleLead(request, request.params.id);
     if (result.error) return response.status(result.status).json({ message: result.error });
@@ -175,7 +225,7 @@ router.delete('/:id/followups/:followUpId', requireAuth, async (request, respons
   } catch (error) { return next(error); }
 });
 
-router.post('/:id/followups/:followUpId/send-whatsapp', requireAuth, async (request, response, next) => {
+router.post('/:id/followups/:followUpId/send-whatsapp', requireAuth, requireAnyPermission('leads.edit'), async (request, response, next) => {
   try {
     const result = await getAccessibleLead(request, request.params.id);
     if (result.error) return response.status(result.status).json({ message: result.error });

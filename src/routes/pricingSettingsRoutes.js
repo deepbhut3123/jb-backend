@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import ProductPricingSettings from '../models/ProductPricingSettings.js';
-import { requireAuth } from '../middleware/auth.js';
+import { requireAuth, requirePermission } from '../middleware/auth.js';
 
 const router = Router();
 const requireAdmin = (request, response, next) => {
@@ -17,14 +17,14 @@ const validate = (value) => {
   return null;
 };
 
-router.use(requireAuth, requireAdmin);
-router.get('/', async (_request, response, next) => {
+router.use(requireAuth);
+router.get('/', requirePermission('settings.view'), async (_request, response, next) => {
   try {
     const settings = await ProductPricingSettings.findOneAndUpdate({ key: 'product-pricing' }, { $setOnInsert: { key: 'product-pricing' } }, { new: true, upsert: true, setDefaultsOnInsert: true }).lean();
     return response.json({ settings });
   } catch (error) { return next(error); }
 });
-router.put('/', async (request, response, next) => {
+router.put('/', requirePermission('settings.edit'), async (request, response, next) => {
   try {
     const values = normalize(request.body);
     const validationError = validate(values);

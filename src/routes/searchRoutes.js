@@ -17,8 +17,9 @@ router.get('/', requireAuth, async (request, response, next) => {
     if (query.length < 2) return response.json({ results: [] });
     const regex = new RegExp(escapeRegex(query), 'i');
     const admin = isAdmin(request.user);
-    const leadScope = admin ? {} : { assignedTo: request.user._id };
-    const quotationScope = admin ? {} : { createdBy: request.user._id };
+    const allowed = (permission) => request.permissions?.includes(permission);
+    const leadScope = admin || allowed('leads.viewAll') || allowed('customers.viewAll') ? {} : { createdBy: request.user._id };
+    const quotationScope = admin || allowed('quotations.viewAll') ? {} : { createdBy: request.user._id };
     const leadMatch = {
       ...leadScope,
       $or: [
@@ -36,11 +37,11 @@ router.get('/', requireAuth, async (request, response, next) => {
     };
 
     const [leads, quotations, products, categories, users] = await Promise.all([
-      Lead.find(leadMatch).select('company city state status companyPersons').sort({ updatedAt: -1 }).limit(8).lean(),
-      Quotation.find(quotationMatch).select('company contactName status items revisionRoot revisionNumber quotationDate').sort({ quotationDate: -1 }).limit(8).lean(),
-      admin ? Product.find({ $or: [{ partCode: regex }, { code: regex }, { name: regex }, { description: regex }, { brand: regex }, { category: regex }, { subCategory: regex }, { subSubCategory: regex }, { hsnCode: regex }] }).select('partCode code name description brand category').limit(8).lean() : [],
-      admin ? Category.find({ $or: [{ name: regex }, { 'subCategories.name': regex }, { 'subCategories.subSubCategories.name': regex }] }).select('name subCategories').limit(8).lean() : [],
-      admin ? User.find({ $or: [{ name: regex }, { email: regex }, { phone: regex }] }).select('name email phone role').limit(8).lean() : [],
+      (allowed('leads.view') || allowed('customers.view')) ? Lead.find(leadMatch).select('company city state status companyPersons').sort({ updatedAt: -1 }).limit(8).lean() : [],
+      allowed('quotations.view') ? Quotation.find(quotationMatch).select('company contactName status items revisionRoot revisionNumber quotationDate').sort({ quotationDate: -1 }).limit(8).lean() : [],
+      allowed('products.view') ? Product.find({ $or: [{ partCode: regex }, { code: regex }, { name: regex }, { description: regex }, { brand: regex }, { category: regex }, { subCategory: regex }, { subSubCategory: regex }, { hsnCode: regex }] }).select('partCode code name description brand category').limit(8).lean() : [],
+      allowed('categories.view') ? Category.find({ $or: [{ name: regex }, { 'subCategories.name': regex }, { 'subCategories.subSubCategories.name': regex }] }).select('name subCategories').limit(8).lean() : [],
+      allowed('users.view') ? User.find({ $or: [{ name: regex }, { email: regex }, { phone: regex }] }).select('name email phone role').limit(8).lean() : [],
     ]);
 
     const customerResults = leads.flatMap((lead) => (lead.companyPersons || [])
@@ -52,8 +53,8 @@ router.get('/', requireAuth, async (request, response, next) => {
       }))).slice(0, 8);
 
     const combinedResults = [
-      ...leads.map((lead) => ({ id: String(lead._id), module: 'Leads', section: 'leads', title: lead.company || 'Unnamed company', subtitle: [lead.city, lead.state, lead.status].filter(Boolean).join(' · ') })),
-      ...customerResults,
+      ...(allowed('leads.view') ? leads.map((lead) => ({ id: String(lead._id), module: 'Leads', section: 'leads', title: lead.company || 'Unnamed company', subtitle: [lead.city, lead.state, lead.status].filter(Boolean).join(' · ') })) : []),
+      ...(allowed('customers.view') ? customerResults : []),
       ...quotations.map((quotation) => ({ id: String(quotation.revisionRoot || quotation._id), module: 'Quotations', section: 'quotations', title: quotation.company || quotation.contactName || 'Quotation', subtitle: [quotation.items?.map((item) => item.productCode || item.productName).filter(Boolean).join(', '), quotation.status].filter(Boolean).join(' · ') })),
       ...products.map((product) => ({ id: String(product._id), module: 'Products', section: 'products', title: product.partCode || product.code || product.name || 'Product', subtitle: [product.description || product.name, product.brand, product.category].filter(Boolean).join(' · ') })),
       ...categories.map((category) => ({ id: String(category._id), module: 'Categories', section: 'categories', title: category.name, subtitle: 'Product category' })),
