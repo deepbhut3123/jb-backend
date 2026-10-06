@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import mongoose from 'mongoose';
-import { requireAuth } from '../middleware/auth.js';
+import { requireAuth, requirePermission } from '../middleware/auth.js';
 import WhatsAppSettings from '../models/WhatsAppSettings.js';
 import WhatsAppEvent from '../models/WhatsAppEvent.js';
 import User from '../models/User.js';
@@ -13,17 +13,17 @@ export function requireWhatsAppAdmin(request, response, next) {
   if (![1, 3].includes(request.user.role)) return response.status(403).json({ message: 'Only administrators can manage WhatsApp.' });
   return next();
 }
-router.use(requireAuth, requireWhatsAppAdmin);
+router.use(requireAuth);
 router.use((_request, response, next) => { response.set('Cache-Control', 'no-store'); next(); });
 
-router.get('/settings', async (_request, response, next) => {
+router.get('/settings', requirePermission('whatsapp.view'), async (_request, response, next) => {
   try {
     const settings = await WhatsAppSettings.findById('company').lean() || new WhatsAppSettings().toObject();
     return response.json({ settings });
   } catch (error) { return next(error); }
 });
 
-router.put('/settings', async (request, response, next) => {
+router.put('/settings', requirePermission('whatsapp.edit'), async (request, response, next) => {
   try {
     const body = request.body || {};
     const settings = {
@@ -55,26 +55,26 @@ router.put('/settings', async (request, response, next) => {
   } catch (error) { return next(error); }
 });
 
-router.post('/preview', (request, response) => {
+router.post('/preview', requirePermission('whatsapp.edit'), (request, response) => {
   const { message, matchText, matchMode, caseSensitive } = request.body || {};
   if (typeof message !== 'string' || message.length > 10000 || typeof matchText !== 'string' || matchText.length > 2000 || !matchModes.includes(matchMode)) return response.status(400).json({ message: 'Enter a valid sample message and matching rule.' });
   return response.json({ matches: matchesMessage(message, { matchText, matchMode, caseSensitive: caseSensitive === true }) });
 });
 
-router.get('/status', (_request, response) => response.json({ connection: getWhatsAppState() }));
-router.post('/connect', async (_request, response, next) => {
+router.get('/status', requirePermission('whatsapp.view'), (_request, response) => response.json({ connection: getWhatsAppState() }));
+router.post('/connect', requirePermission('whatsapp.edit'), async (_request, response, next) => {
   try { return response.json({ connection: await connectWhatsApp() }); } catch (error) { return next(error); }
 });
-router.post('/disconnect', async (_request, response, next) => {
+router.post('/disconnect', requirePermission('whatsapp.edit'), async (_request, response, next) => {
   try { return response.json({ connection: await disconnectWhatsApp() }); } catch (error) { return next(error); }
 });
-router.get('/activity', async (_request, response, next) => {
+router.get('/activity', requirePermission('whatsapp.view'), async (_request, response, next) => {
   try {
     const events = await WhatsAppEvent.find().sort({ createdAt: -1 }).limit(30).select('name phone body receivedAt outcome error lead attempts').lean();
     return response.json({ events });
   } catch (error) { return next(error); }
 });
-router.post('/activity/:id/retry', async (request, response, next) => {
+router.post('/activity/:id/retry', requirePermission('whatsapp.edit'), async (request, response, next) => {
   try {
     if (!mongoose.isValidObjectId(request.params.id)) return response.status(400).json({ message: 'Invalid activity ID.' });
     if (!await WhatsAppSettings.exists({ _id: 'company', enabled: true })) return response.status(409).json({ message: 'Save and enable automation before retrying.' });

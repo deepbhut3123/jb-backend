@@ -5,7 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import multer from 'multer';
 import Product from '../models/Product.js';
-import { requireAuth } from '../middleware/auth.js';
+import { requireAuth, requireAnyPermission, requirePermission } from '../middleware/auth.js';
 import ProductPricingSettings from '../models/ProductPricingSettings.js';
 
 const router = Router();
@@ -83,7 +83,7 @@ function validateProduct(product) {
 
 router.use(requireAuth);
 
-router.get('/', async (request, response, next) => {
+router.get('/', requireAnyPermission('products.view', 'quotations.view'), async (request, response, next) => {
   try {
     const page = Math.max(Number.parseInt(request.query.page, 10) || 1, 1);
     const limit = Math.min(Math.max(Number.parseInt(request.query.limit, 10) || 10, 1), 1000);
@@ -96,9 +96,7 @@ router.get('/', async (request, response, next) => {
   } catch (error) { return next(error); }
 });
 
-router.use(requireAdmin);
-
-router.post('/', uploadProductImage.single('image'), async (request, response, next) => {
+router.post('/', requirePermission('products.create'), uploadProductImage.single('image'), async (request, response, next) => {
   try {
     const settings = await ProductPricingSettings.findOne({ key: 'product-pricing' }).lean();
     const productData = normalizeProduct({ ...(settings || {}), ...request.body, dollarRate: request.body.dollarRate ?? settings?.dollarRate, marginPercent: request.body.marginPercent ?? 0, priceMultiplier: request.body.priceMultiplier ?? settings?.multiplier }, request.file);
@@ -110,7 +108,7 @@ router.post('/', uploadProductImage.single('image'), async (request, response, n
   } catch (error) { return next(error); }
 });
 
-router.put('/:id', uploadProductImage.single('image'), async (request, response, next) => {
+router.put('/:id', requirePermission('products.edit'), uploadProductImage.single('image'), async (request, response, next) => {
   try {
     const existingProduct = await Product.findById(request.params.id).lean();
     if (!existingProduct) return response.status(404).json({ message: 'Product not found.' });
@@ -125,7 +123,7 @@ router.put('/:id', uploadProductImage.single('image'), async (request, response,
   } catch (error) { return next(error); }
 });
 
-router.delete('/:id', async (request, response, next) => {
+router.delete('/:id', requirePermission('products.delete'), async (request, response, next) => {
   try {
     const product = await Product.findByIdAndDelete(request.params.id);
     if (!product) return response.status(404).json({ message: 'Product not found.' });

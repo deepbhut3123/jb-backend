@@ -1,9 +1,9 @@
 import { Router } from 'express';
-import { requireAuth } from '../middleware/auth.js';
+import { requireAuth, requirePermission } from '../middleware/auth.js';
 
 const router = Router();
 
-router.get('/summary', requireAuth, async (request, response) => {
+router.get('/summary', requireAuth, requirePermission('dashboard.view'), async (request, response) => {
   response.json({
     user: { name: request.user.name, email: request.user.email, role: request.user.role },
     metrics: [
