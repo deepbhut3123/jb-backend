@@ -144,7 +144,7 @@ router.post('/:id/customers', requireAuth, requireAnyPermission('customers.creat
     const customer = customerDetails(request.body);
     if (!customer) return response.status(400).json({ message: 'Enter at least one customer detail.' });
     if (hasInvalidCompanyPersonEmail([customer])) return response.status(400).json({ message: 'Enter a valid customer email address.' });
-    result.lead.companyPersons.push(customer);
+    result.lead.companyPersons.unshift(customer);
     await result.lead.save();
     const populated = await result.lead.populate('assignedTo', 'name');
     return response.status(201).json({ lead: serializeLead(populated.toObject()) });
@@ -186,7 +186,7 @@ router.post('/:id/followups', requireAuth, requireAnyPermission('leads.create'),
     if (result.error) return response.status(result.status).json({ message: result.error });
     const { date, description, nextDate } = request.body || {};
     if (!date || !description?.trim()) return response.status(400).json({ message: 'Follow-up date and description are required.' });
-    result.lead.followUps.push({ date, description: description.trim(), nextDate: nextDate || undefined });
+    result.lead.followUps.unshift({ date, description: description.trim(), nextDate: nextDate || undefined });
     result.lead.nextFollowUp = nextDate || undefined;
     await result.lead.save();
     const populated = await result.lead.populate('assignedTo', 'name');
