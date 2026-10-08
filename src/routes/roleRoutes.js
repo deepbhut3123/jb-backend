@@ -26,7 +26,7 @@ const normalizePermissions = sanitizePermissions;
 router.get('/', async (_request, response, next) => {
   try {
     const [roles, assignments, administratorCount] = await Promise.all([
-      Role.find().sort({ name: 1 }).lean(),
+      Role.find().sort({ createdAt: -1, _id: -1 }).lean(),
       User.aggregate([{ $match: { roleProfile: { $ne: null } } }, { $group: { _id: '$roleProfile', count: { $sum: 1 } } }]),
       User.countDocuments({ role: { $in: [1, 3] } }),
     ]);

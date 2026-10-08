@@ -16,7 +16,7 @@ router.use(requireAuth);
 
 router.get('/', requireAnyPermission('categories.view', 'products.view', 'quotations.view'), async (_request, response, next) => {
   try {
-    const categories = await Category.find().sort({ name: 1 }).lean();
+    const categories = await Category.find().sort({ createdAt: -1, _id: -1 }).lean();
     return response.json({ categories });
   } catch (error) { return next(error); }
 });
@@ -61,7 +61,7 @@ router.post('/:id/subcategories', requirePermission('categories.create'), async 
     const category = await Category.findById(request.params.id);
     if (!category) return response.status(404).json({ message: 'Category not found.' });
     if (category.subCategories.some((item) => item.name.toLowerCase() === name.toLowerCase())) return response.status(409).json({ message: 'This sub category already exists under the selected category.' });
-    category.subCategories.push({ name });
+    category.subCategories.unshift({ name });
     await category.save();
     return response.status(201).json({ category });
   } catch (error) { return next(error); }
@@ -103,7 +103,7 @@ router.post('/:id/subcategories/:subCategoryId/subsubcategories', requirePermiss
     const subCategory = category.subCategories.id(request.params.subCategoryId);
     if (!subCategory) return response.status(404).json({ message: 'Sub category not found.' });
     if (subCategory.subSubCategories.some((item) => item.name.toLowerCase() === name.toLowerCase())) return response.status(409).json({ message: 'This sub-sub category already exists under the selected sub category.' });
-    subCategory.subSubCategories.push({ name });
+    subCategory.subSubCategories.unshift({ name });
     await category.save();
     return response.status(201).json({ category });
   } catch (error) { return next(error); }

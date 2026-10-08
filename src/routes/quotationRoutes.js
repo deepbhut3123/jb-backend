@@ -10,6 +10,15 @@ const router = Router();
 const isAdmin = (user) => [1, 3].includes(user.role);
 const statuses = ['Draft', 'Sent', 'Accepted', 'Rejected'];
 
+function normalizeIndianMobile(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  const digits = raw.replace(/\D/g, '');
+  if (/^\d{10}$/.test(digits)) return `+91${digits}`;
+  if (/^91\d{10}$/.test(digits)) return `+${digits}`;
+  return raw;
+}
+
 function serializeQuotation(quotation) {
   const populatedLead = quotation.leadId && typeof quotation.leadId === 'object' && quotation.leadId._id ? quotation.leadId : null;
   return {
@@ -97,7 +106,7 @@ async function normalizeQuotation(body = {}) {
     contactRole: String(body.contactRole || '').trim(),
     company: String(body.company || '').trim(),
     email: String(body.email || '').trim().toLowerCase(),
-    phone: String(body.phone || '').trim(),
+    phone: normalizeIndianMobile(body.phone),
     items,
     subtotal,
     freightPacking,
@@ -114,6 +123,7 @@ async function normalizeQuotation(body = {}) {
 function validateQuotation(quotation) {
   if (!mongoose.Types.ObjectId.isValid(quotation.leadId)) return 'Please select a valid lead.';
   if (quotation.contactPersonId && !mongoose.Types.ObjectId.isValid(quotation.contactPersonId)) return 'Please select a valid person.';
+  if (quotation.phone && !/^\+91\d{10}$/.test(quotation.phone)) return 'Enter a valid 10-digit Indian mobile number.';
   if (!quotation.items.length) return 'Please add at least one active product from Product Master.';
   if (Number.isNaN(quotation.quotationDate.getTime())) return 'Please select a valid quotation date.';
   if (!statuses.includes(quotation.status)) return 'Please select a valid quotation status.';
