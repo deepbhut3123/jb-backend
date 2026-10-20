@@ -63,15 +63,18 @@ function serializeQuotation(quotation) {
 
 async function normalizeQuotation(body = {}) {
   const requestedItems = Array.isArray(body.items) ? body.items : [];
-  const productIds = [...new Set(requestedItems.map((item) => String(item.productId || '')).filter(Boolean))];
+  const productIds = [...new Set(requestedItems.map((item) => String(item.productId || '')).filter((id) => mongoose.Types.ObjectId.isValid(id)))];
   const products = await Product.find({ _id: { $in: productIds }, isActive: true }).lean();
   const productMap = new Map(products.map((product) => [String(product._id), product]));
   const items = requestedItems.map((item) => {
     const product = productMap.get(String(item.productId));
     const quantity = Number(item.quantity);
-    if (!product || !Number.isFinite(quantity) || quantity <= 0) return null;
-    const unitPrice = Number(product.finalRate ?? product.mrp ?? product.salePrice);
+    const productName = String(product ? product.description || product.name : item.productName || '').trim();
+    if (!productName || !Number.isFinite(quantity) || quantity <= 0) return null;
+    const unitPrice = Number(product ? product.finalRate ?? product.mrp ?? product.salePrice : item.unitPrice);
     if (!Number.isFinite(unitPrice) || unitPrice < 0) return null;
+    const requestedTaxRate = Number(product ? product.taxRate ?? 0 : item.taxRate ?? 18);
+    if (!Number.isFinite(requestedTaxRate) || requestedTaxRate < 0 || requestedTaxRate > 100) return null;
     const lineSubtotal = Number((quantity * unitPrice).toFixed(2));
     const usesDiscountAmount = item.discountMode === 'amount';
     const requestedDiscountPercent = Number(item.discountPercent || 0);
@@ -82,8 +85,8 @@ async function normalizeQuotation(body = {}) {
       : Number((lineSubtotal * safeDiscountPercent / 100).toFixed(2));
     const discountPercent = lineSubtotal > 0 ? Number(((discountAmount / lineSubtotal) * 100).toFixed(6)) : 0;
     const lineTotal = Number((lineSubtotal - discountAmount).toFixed(2));
-    const description = String(item.description ?? product.description ?? product.name ?? '').trim();
-    return { productId: product._id, productName: product.description || product.name, productCode: product.partCode || product.code, description, unit: product.unit || '', quantity, unitPrice, taxRate: product.taxRate, lineSubtotal, discountPercent, discountAmount, lineTotal };
+    const description = String(item.description ?? product?.description ?? productName).trim();
+    return { productId: product?._id || null, productName, productCode: product?.partCode || product?.code || '', description, unit: product?.unit || String(item.unit || '').trim(), quantity, unitPrice, taxRate: requestedTaxRate, lineSubtotal, discountPercent, discountAmount, lineTotal };
   }).filter(Boolean);
   const subtotal = Number(items.reduce((total, item) => total + item.lineSubtotal, 0).toFixed(2));
   const discountAmount = Number(items.reduce((total, item) => total + item.discountAmount, 0).toFixed(2));
@@ -124,7 +127,7 @@ function validateQuotation(quotation) {
   if (!mongoose.Types.ObjectId.isValid(quotation.leadId)) return 'Please select a valid lead.';
   if (quotation.contactPersonId && !mongoose.Types.ObjectId.isValid(quotation.contactPersonId)) return 'Please select a valid person.';
   if (quotation.phone && !/^\+91\d{10}$/.test(quotation.phone)) return 'Enter a valid 10-digit Indian mobile number.';
-  if (!quotation.items.length) return 'Please add at least one active product from Product Master.';
+  if (!quotation.items.length) return 'Please add at least one valid product with a name, quantity, and rate.';
   if (Number.isNaN(quotation.quotationDate.getTime())) return 'Please select a valid quotation date.';
   if (!statuses.includes(quotation.status)) return 'Please select a valid quotation status.';
   return null;
@@ -211,14 +214,17 @@ router.get('/', requirePermission('quotations.view'), async (request, response, 
       }
     }
     if (queryConditions.length) filter.$and = queryConditions;
-    const quotations = await Quotation.find(filter).populate('createdBy', 'name').populate('leadId', 'name company address1 address2 area city state').sort({ createdAt: -1 }).lean();
+    const page = Math.max(Number.parseInt(request.query.page, 10) || 1, 1);
+    const limit = Math.min(Math.max(Number.parseInt(request.query.limit, 10) || 10, 1), 100);
+    const total = await Quotation.countDocuments(filter);
+    const quotations = await Quotation.find(filter).populate('createdBy', 'name').populate('leadId', 'name company address1 address2 area city state').sort({ createdAt: -1 }).skip((page - 1) * limit).limit(limit).lean();
     const summary = {
       total: quotations.length,
       sent: quotations.filter((item) => item.status === 'Sent').length,
       draft: quotations.filter((item) => item.status === 'Draft').length,
       revisions: quotations.filter((item) => item.revisionNumber > 0).length,
     };
-    return response.json({ quotations: quotations.map(serializeQuotation), summary, scope: isAdmin(request.user) ? 'all' : 'own' });
+    return response.json({ quotations: quotations.map(serializeQuotation), summary, scope: isAdmin(request.user) ? 'all' : 'own', pagination: { page, limit, total, totalPages: Math.max(Math.ceil(total / limit), 1) } });
   } catch (error) { return next(error); }
 });
 

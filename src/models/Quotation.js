@@ -18,7 +18,7 @@ const quotationSchema = new mongoose.Schema(
     email: { type: String, trim: true, lowercase: true, maxlength: 160 },
     phone: { type: String, trim: true, maxlength: 30 },
     items: [{
-      productId: { type: mongoose.Schema.Types.ObjectId, ref: 'Product', required: true },
+      productId: { type: mongoose.Schema.Types.ObjectId, ref: 'Product', default: null },
       productName: { type: String, required: true, trim: true },
       productCode: { type: String, trim: true },
       description: { type: String, trim: true, maxlength: 1000 },
