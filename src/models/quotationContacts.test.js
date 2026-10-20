@@ -34,3 +34,19 @@ test('quotation stores a selected person snapshot', async () => {
   assert.equal(quotation.contactName, 'Priya');
   assert.equal(quotation.contactRole, 'Buyer');
 });
+
+test('quotation stores a custom product without a Product Master id', async () => {
+  const quotation = new Quotation(quotationData({ items: [{
+    productName: 'Custom installation kit',
+    description: 'Made for this quotation only',
+    quantity: 2,
+    unitPrice: 250,
+    taxRate: 18,
+    lineSubtotal: 500,
+    lineTotal: 500,
+  }] }));
+  await quotation.validate();
+  assert.equal(quotation.items[0].productId, null);
+  assert.equal(quotation.items[0].productName, 'Custom installation kit');
+  assert.equal(quotation.items[0].unitPrice, 250);
+});
