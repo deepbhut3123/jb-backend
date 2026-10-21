@@ -2,6 +2,7 @@ export const PERMISSION_MODULES = [
   { key: 'dashboard', label: 'Dashboard', actions: ['menu', 'view'] },
   { key: 'leads', label: 'Leads', actions: ['menu', 'view', 'viewAll', 'create', 'edit', 'delete'] },
   { key: 'quotations', label: 'Quotations', actions: ['menu', 'view', 'viewAll', 'create', 'edit', 'delete'] },
+  { key: 'reports', label: 'Reports', actions: ['menu', 'view'] },
   { key: 'products', label: 'Products', actions: ['menu', 'view', 'create', 'edit', 'delete'] },
   { key: 'categories', label: 'Categories', actions: ['menu', 'view', 'create', 'edit', 'delete'] },
   { key: 'customers', label: 'Customers', actions: ['menu', 'view', 'viewAll', 'create', 'edit', 'delete'] },
