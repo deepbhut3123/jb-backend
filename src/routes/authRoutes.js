@@ -59,7 +59,7 @@ router.post('/login', async (request, response, next) => {
     const user = await User.findOne({ email }).select('+passwordHash').populate('roleProfile', 'name permissions isActive');
     if (!user || !(await bcrypt.compare(request.body.password || '', user.passwordHash))) return response.status(401).json({ message: 'Email or password is incorrect.' });
     if (user.roleProfile && !user.roleProfile.isActive && !isAdministrator(user)) return response.status(403).json({ message: 'Your assigned role is inactive. Contact an administrator.' });
-    return response.json({ token: issueToken(user), user: { id: user._id, name: user.name, email: user.email, role: user.role, roleProfile: user.roleProfile ? { id: user.roleProfile._id, name: user.roleProfile.name } : null, permissions: effectivePermissions(user) } });
+    return response.json({ token: issueToken(user), user: { id: user._id, name: user.name, email: user.email, phone: user.phone || '', role: user.role, roleProfile: user.roleProfile ? { id: user.roleProfile._id, name: user.roleProfile.name } : null, permissions: effectivePermissions(user) } });
   } catch (error) { return next(error); }
 });
 
@@ -105,6 +105,7 @@ router.get('/session', requireAuth, (request, response) => response.json({
     id: request.user._id,
     name: request.user.name,
     email: request.user.email,
+    phone: request.user.phone || '',
     role: request.user.role,
     roleProfile: request.user.roleProfile ? { id: request.user.roleProfile._id, name: request.user.roleProfile.name } : null,
     permissions: request.permissions,

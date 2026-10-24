@@ -44,6 +44,7 @@ function serializeQuotation(quotation) {
     company: quotation.company || '',
     email: quotation.email || '',
     phone: quotation.phone || '',
+    notes: quotation.notes || '',
     items: quotation.items || [],
     subtotal: quotation.subtotal ?? quotation.amount,
     freightPacking: quotation.freightPacking || 0,
@@ -56,6 +57,8 @@ function serializeQuotation(quotation) {
     status: quotation.status,
     createdBy: quotation.createdBy?._id || quotation.createdBy,
     createdByName: quotation.createdBy?.name || '',
+    createdByPhone: quotation.createdBy?.phone || '',
+    createdByEmail: quotation.createdBy?.email || '',
     createdAt: quotation.createdAt,
     updatedAt: quotation.updatedAt,
   };
@@ -110,6 +113,7 @@ async function normalizeQuotation(body = {}) {
     company: String(body.company || '').trim(),
     email: String(body.email || '').trim().toLowerCase(),
     phone: normalizeIndianMobile(body.phone),
+    notes: String(body.notes || '').trim(),
     items,
     subtotal,
     freightPacking,
@@ -217,7 +221,7 @@ router.get('/', requirePermission('quotations.view'), async (request, response, 
     const page = Math.max(Number.parseInt(request.query.page, 10) || 1, 1);
     const limit = Math.min(Math.max(Number.parseInt(request.query.limit, 10) || 10, 1), 100);
     const total = await Quotation.countDocuments(filter);
-    const quotations = await Quotation.find(filter).populate('createdBy', 'name').populate('leadId', 'name company address1 address2 area city state').sort({ createdAt: -1 }).skip((page - 1) * limit).limit(limit).lean();
+    const quotations = await Quotation.find(filter).populate('createdBy', 'name phone email').populate('leadId', 'name company address1 address2 area city state').sort({ createdAt: -1 }).skip((page - 1) * limit).limit(limit).lean();
     const summary = {
       total: quotations.length,
       sent: quotations.filter((item) => item.status === 'Sent').length,
@@ -265,7 +269,7 @@ router.post('/', requirePermission('quotations.create'), async (request, respons
     }
     const quotation = await Quotation.create({ ...quotationData, revisedFrom, revisionRoot, revisionNumber, quotationYear, serialNumber, creatorInitial, createdBy: request.user._id });
     await Lead.updateOne({ _id: lead._id }, { $set: { stage: 'Quotation', status: 'Quotation' } });
-    await quotation.populate([{ path: 'createdBy', select: 'name' }, { path: 'leadId', select: 'name company address1 address2 area city state' }]);
+    await quotation.populate([{ path: 'createdBy', select: 'name phone email' }, { path: 'leadId', select: 'name company address1 address2 area city state' }]);
     return response.status(201).json({ quotation: serializeQuotation(quotation.toObject()) });
   } catch (error) { return next(error); }
 });
@@ -279,7 +283,21 @@ router.put('/:id', requirePermission('quotations.edit'), async (request, respons
     const lead = await Lead.findOne(leadScope(request, quotationData.leadId)).lean();
     if (!lead) return response.status(404).json({ message: 'Lead not found or is not available to you.' });
     if (quotationData.contactPersonId && !lead.companyPersons?.some((person) => String(person._id) === quotationData.contactPersonId)) return response.status(400).json({ message: 'The selected person does not belong to this lead.' });
-    const quotation = await Quotation.findOneAndUpdate(filter, quotationData, { new: true, runValidators: true }).populate([{ path: 'createdBy', select: 'name' }, { path: 'leadId', select: 'name company address1 address2 area city state' }]);
+    const quotation = await Quotation.findOneAndUpdate(filter, quotationData, { new: true, runValidators: true }).populate([{ path: 'createdBy', select: 'name phone email' }, { path: 'leadId', select: 'name company address1 address2 area city state' }]);
+    if (!quotation) return response.status(404).json({ message: 'Quotation not found.' });
+    return response.json({ quotation: serializeQuotation(quotation.toObject()) });
+  } catch (error) { return next(error); }
+});
+
+router.patch('/:id/notes', requirePermission('quotations.edit'), async (request, response, next) => {
+  try {
+    const notes = String(request.body?.notes || '').trim();
+    if (notes.length > 3000) return response.status(400).json({ message: 'Internal notes cannot exceed 3,000 characters.' });
+    const quotation = await Quotation.findOneAndUpdate(
+      { ...quotationScope(request), _id: request.params.id },
+      { $set: { notes } },
+      { new: true, runValidators: true },
+    ).populate([{ path: 'createdBy', select: 'name phone email' }, { path: 'leadId', select: 'name company address1 address2 area city state' }]);
     if (!quotation) return response.status(404).json({ message: 'Quotation not found.' });
     return response.json({ quotation: serializeQuotation(quotation.toObject()) });
   } catch (error) { return next(error); }
@@ -291,7 +309,7 @@ router.patch('/:id/status', async (request, response, next) => {
     if (!statuses.includes(status)) return response.status(400).json({ message: 'Please select a valid quotation status.' });
     if (Array.isArray(request.permissions) && !request.permissions.includes('quotations.edit')) return response.status(403).json({ message: 'You do not have permission to edit quotations.' });
     const filter = { ...quotationScope(request), _id: request.params.id };
-    const quotation = await Quotation.findOneAndUpdate(filter, { $set: { status } }, { new: true, runValidators: true }).populate([{ path: 'createdBy', select: 'name' }, { path: 'leadId', select: 'name company address1 address2 area city state' }]);
+    const quotation = await Quotation.findOneAndUpdate(filter, { $set: { status } }, { new: true, runValidators: true }).populate([{ path: 'createdBy', select: 'name phone email' }, { path: 'leadId', select: 'name company address1 address2 area city state' }]);
     if (!quotation) return response.status(404).json({ message: 'Quotation not found.' });
     return response.json({ quotation: serializeQuotation(quotation.toObject()) });
   } catch (error) { return next(error); }
