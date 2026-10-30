@@ -10,6 +10,11 @@ import ProductPricingSettings from '../models/ProductPricingSettings.js';
 
 const router = Router();
 const taxRates = [0, 5, 12, 18, 28];
+const productColumnFields = {
+  partCode: 'partCode', description: 'description', brand: 'brand', category: 'category',
+  subCategory: 'subCategory', subSubCategory: 'subSubCategory', hsnCode: 'hsnCode',
+  taxRate: 'taxRate', finalRate: 'mrp', image: 'image',
+};
 const productRoutesDirectory = path.dirname(fileURLToPath(import.meta.url));
 const productImageDirectory = path.join(productRoutesDirectory, '..', '..', 'public', 'products');
 const imageStorage = multer.diskStorage({
@@ -83,6 +88,17 @@ function validateProduct(product) {
 
 router.use(requireAuth);
 
+router.get('/filter-options', requireAnyPermission('products.view', 'quotations.view'), async (_request, response, next) => {
+  try {
+    const entries = await Promise.all(Object.entries(productColumnFields).map(async ([key, field]) => {
+      if (key === 'image') return [key, ['Yes', 'No']];
+      const values = await Product.distinct(field);
+      return [key, values.filter((value) => value !== null && value !== undefined && value !== '').map(String).sort((first, second) => first.localeCompare(second, undefined, { numeric: true, sensitivity: 'base' }))];
+    }));
+    return response.json({ options: Object.fromEntries(entries) });
+  } catch (error) { return next(error); }
+});
+
 router.get('/', requireAnyPermission('products.view', 'quotations.view'), async (request, response, next) => {
   try {
     const page = Math.max(Number.parseInt(request.query.page, 10) || 1, 1);
@@ -90,8 +106,17 @@ router.get('/', requireAnyPermission('products.view', 'quotations.view'), async 
     const filter = {};
     if (request.query.status === 'active') filter.isActive = true;
     if (request.query.status === 'inactive') filter.isActive = false;
+    Object.entries(productColumnFields).forEach(([key, field]) => {
+      const value = request.query[`filter_${key}`];
+      if (value === undefined || value === '') return;
+      if (key === 'image') filter.image = value === 'Yes' ? { $nin: ['', null] } : { $in: ['', null] };
+      else filter[field] = value;
+    });
     if (request.query.search?.trim()) { const query = request.query.search.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); filter.$or = [{ partCode: { $regex: query, $options: 'i' } }, { code: { $regex: query, $options: 'i' } }, { description: { $regex: query, $options: 'i' } }, { name: { $regex: query, $options: 'i' } }, { brand: { $regex: query, $options: 'i' } }, { category: { $regex: query, $options: 'i' } }, { subCategory: { $regex: query, $options: 'i' } }, { subSubCategory: { $regex: query, $options: 'i' } }, { hsnCode: { $regex: query, $options: 'i' } }]; }
-    const [total, products] = await Promise.all([Product.countDocuments(filter), Product.find(filter).sort({ createdAt: -1 }).skip((page - 1) * limit).limit(limit).lean()]);
+    const requestedSort = productColumnFields[request.query.sortBy] || 'createdAt';
+    const sortOrder = request.query.sortOrder === 'desc' ? -1 : 1;
+    const sort = request.query.sortBy ? { [requestedSort]: sortOrder, _id: 1 } : { createdAt: -1 };
+    const [total, products] = await Promise.all([Product.countDocuments(filter), Product.find(filter).sort(sort).skip((page - 1) * limit).limit(limit).lean()]);
     return response.json({ products, pagination: { page, limit, total, totalPages: Math.max(Math.ceil(total / limit), 1) } });
   } catch (error) { return next(error); }
 });
