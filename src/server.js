@@ -14,10 +14,12 @@ import leadOptionRoutes from './routes/leadOptionRoutes.js';
 import categoryRoutes from './routes/categoryRoutes.js';
 import whatsappRoutes from './routes/whatsappRoutes.js';
 import pricingSettingsRoutes from './routes/pricingSettingsRoutes.js';
+import smtpSettingsRoutes from './routes/smtpSettingsRoutes.js';
 import searchRoutes from './routes/searchRoutes.js';
 import profileRoutes from './routes/profileRoutes.js';
 import roleRoutes from './routes/roleRoutes.js';
 import reportRoutes from './routes/reportRoutes.js';
+import salesOrderRoutes from './routes/salesOrderRoutes.js';
 import { startWhatsAppService, stopWhatsAppService } from './services/whatsapp.js';
 
 dotenv.config();
@@ -70,10 +72,12 @@ app.use('/api/lead-options', leadOptionRoutes);
 app.use('/api/categories', categoryRoutes);
 app.use('/api/whatsapp', whatsappRoutes);
 app.use('/api/pricing-settings', pricingSettingsRoutes);
+app.use('/api/smtp-settings', smtpSettingsRoutes);
 app.use('/api/search', searchRoutes);
 app.use('/api/profile', profileRoutes);
 app.use('/api/roles', roleRoutes);
 app.use('/api/reports', reportRoutes);
+app.use('/api/sales-orders', salesOrderRoutes);
 
 app.get('/api/health', (_request, response) => {
   response.json({

@@ -5,6 +5,7 @@ import QuotationCounter from '../models/QuotationCounter.js';
 import Product from '../models/Product.js';
 import Lead from '../models/Lead.js';
 import { requireAuth, requirePermission } from '../middleware/auth.js';
+import { createSalesOrderForQuotation } from '../services/salesOrders.js';
 
 const router = Router();
 const isAdmin = (user) => [1, 3].includes(user.role);
@@ -311,7 +312,10 @@ router.patch('/:id/status', async (request, response, next) => {
     const filter = { ...quotationScope(request), _id: request.params.id };
     const quotation = await Quotation.findOneAndUpdate(filter, { $set: { status } }, { new: true, runValidators: true }).populate([{ path: 'createdBy', select: 'name phone email' }, { path: 'leadId', select: 'name company address1 address2 area city state' }]);
     if (!quotation) return response.status(404).json({ message: 'Quotation not found.' });
-    return response.json({ quotation: serializeQuotation(quotation.toObject()) });
+    const salesOrderResult = status === 'Accepted'
+      ? await createSalesOrderForQuotation(quotation.toObject(), request.user._id)
+      : null;
+    return response.json({ quotation: serializeQuotation(quotation.toObject()), salesOrderCreated: Boolean(salesOrderResult?.created) });
   } catch (error) { return next(error); }
 });
 

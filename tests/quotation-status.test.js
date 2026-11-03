@@ -3,6 +3,7 @@ import { test } from 'node:test';
 import router from '../src/routes/quotationRoutes.js';
 import Quotation from '../src/models/Quotation.js';
 import Product from '../src/models/Product.js';
+import SalesOrder from '../src/models/SalesOrder.js';
 
 const updateStatus = router.stack.find((layer) => layer.route?.path === '/:id/status' && layer.route.methods.patch).route.stack[0].handle;
 
@@ -17,9 +18,11 @@ function responseRecorder() {
 
 test('status updates preserve quotation details and enforce ownership', async (context) => {
   context.mock.method(Product, 'find', () => { throw new Error('Status updates must not reload or reprice products.'); });
+  context.mock.method(SalesOrder, 'findOne', () => ({ lean: async () => null }));
+  const create = context.mock.method(SalesOrder, 'create', async (payload) => ({ toObject: () => payload }));
   for (const role of [1, 2, 3]) {
     for (const status of ['Draft', 'Sent', 'Accepted', 'Rejected']) {
-      const saved = { _id: 'quotation-1', customerName: 'Customer', amount: 123, items: [{ productName: 'Saved product', unitPrice: 123 }], status };
+      const saved = { _id: 'quotation-1', leadId: 'lead-1', customerName: 'Customer', amount: 123, items: [{ productName: 'Saved product', quantity: 1, unitPrice: 123, lineTotal: 123 }], status };
       const update = context.mock.method(Quotation, 'findOneAndUpdate', (filter, changes, options) => {
         assert.deepEqual(filter, role === 2 ? { _id: 'quotation-1', createdBy: 'owner-1' } : { _id: 'quotation-1' });
         assert.deepEqual(changes, { $set: { status } });
@@ -32,10 +35,12 @@ test('status updates preserve quotation details and enforce ownership', async (c
       assert.equal(response.body.quotation.status, status);
       assert.equal(response.body.quotation.amount, 123);
       assert.deepEqual(response.body.quotation.items, saved.items);
+      assert.equal(response.body.salesOrderCreated, status === 'Accepted');
       assert.equal(update.mock.callCount(), 1);
       update.mock.restore();
     }
   }
+  assert.equal(create.mock.callCount(), 3);
 });
 
 test('invalid statuses are rejected before updating a quotation', async (context) => {

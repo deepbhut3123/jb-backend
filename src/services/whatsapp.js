@@ -1,6 +1,7 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import WhatsAppSettings from '../models/WhatsAppSettings.js';
+import { createSalesOrderForLead } from './salesOrders.js';
 import WhatsAppEvent from '../models/WhatsAppEvent.js';
 import Lead from '../models/Lead.js';
 import User from '../models/User.js';
@@ -69,6 +70,7 @@ export async function processWhatsAppEvent(event) {
       lead = await Lead.findOneAndUpdate({ whatsappIdentity: identity }, {
         $setOnInsert: leadDefaults(settings, event, identity),
       }, { upsert: true, new: true, runValidators: true, setDefaultsOnInsert: true });
+      if ((lead.stage || lead.status) === 'Done') await createSalesOrderForLead(lead.toObject(), settings.updatedBy, 'lead-stage');
       event.outcome = 'created';
     }
     event.lead = lead._id;

@@ -1,23 +1,9 @@
 import nodemailer from 'nodemailer';
-
-function getTransporter() {
-  const { SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, SMTP_SECURE } = process.env;
-
-  if (!SMTP_HOST || !SMTP_PORT || !SMTP_USER || !SMTP_PASS) {
-    throw new Error('SMTP configuration is missing.');
-  }
-
-  return nodemailer.createTransport({
-    host: SMTP_HOST,
-    port: Number(SMTP_PORT),
-    secure: SMTP_SECURE === 'true',
-    auth: { user: SMTP_USER, pass: SMTP_PASS },
-  });
-}
+import { getEffectiveSmtpSettings } from '../services/smtpSettings.js';
 
 export async function sendOtpEmail({ email, code, purpose }) {
   const action = purpose === 'register' ? 'verify your JB Corporation CRM account' : 'reset your CRM password';
-  const from = process.env.SMTP_FROM || process.env.SMTP_USER;
+  const settings = await getEffectiveSmtpSettings();
   const expiry = process.env.OTP_EXPIRY_MINUTES || '10';
   const title = purpose === 'register' ? 'Verify your email address' : 'Reset your CRM password';
   const logoUrl = process.env.EMAIL_LOGO_URL || '';
@@ -25,8 +11,9 @@ export async function sendOtpEmail({ email, code, purpose }) {
     ? `<img src="${logoUrl}" alt="JB Corporation" width="180" style="display:block;max-width:180px;height:auto;border:0">`
     : '<div style="color:#ffffff;font-size:20px;font-weight:800;letter-spacing:1px">JB CORPORATION</div>';
 
-  await getTransporter().sendMail({
-    from,
+  const transporter = nodemailer.createTransport({ host: settings.host, port: settings.port, secure: settings.secure, auth: { user: settings.username, pass: settings.password } });
+  await transporter.sendMail({
+    from: settings.from,
     to: email,
     subject: `JB Corporation CRM — ${title}`,
     text: `JB Corporation CRM\n\n${title}\n\nYour verification code is ${code}. It expires in ${expiry} minutes. If you did not request this, you can ignore this email.`,

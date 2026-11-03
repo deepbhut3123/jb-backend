@@ -7,13 +7,14 @@ import multer from 'multer';
 import Product from '../models/Product.js';
 import { requireAuth, requireAnyPermission, requirePermission } from '../middleware/auth.js';
 import ProductPricingSettings from '../models/ProductPricingSettings.js';
+import { calculateProductPricing } from '../utils/productPricing.js';
 
 const router = Router();
 const taxRates = [0, 5, 12, 18, 28];
 const productColumnFields = {
   partCode: 'partCode', description: 'description', brand: 'brand', category: 'category',
   subCategory: 'subCategory', subSubCategory: 'subSubCategory', hsnCode: 'hsnCode',
-  taxRate: 'taxRate', finalRate: 'mrp', image: 'image',
+  taxRate: 'taxRate', currency: 'currency', finalRate: 'mrp', image: 'image',
 };
 const productRoutesDirectory = path.dirname(fileURLToPath(import.meta.url));
 const productImageDirectory = path.join(productRoutesDirectory, '..', '..', 'public', 'products');
@@ -51,14 +52,16 @@ function requireAdmin(request, response, next) {
 }
 
 function normalizeProduct(body = {}, imageFile) {
-  const hasDollarAmount = body.dollarAmount !== '' && body.dollarAmount != null;
-  const dollarAmount = hasDollarAmount ? Number(body.dollarAmount) : 0;
+  const currency = ['USD', 'INR'].includes(String(body.currency || '').toUpperCase())
+    ? String(body.currency).toUpperCase()
+    : Number(body.dollarAmount) > 0 ? 'USD' : 'INR';
+  const rawAmount = currency === 'USD' ? body.dollarAmount : (body.priceAmount ?? body.mrp);
+  const hasAmount = rawAmount !== '' && rawAmount != null;
+  const amount = hasAmount ? Number(rawAmount) : 0;
   const dollarRate = body.dollarRate === '' || body.dollarRate == null ? 1 : Number(body.dollarRate);
-  const marginPercent = body.marginPercent === '' || body.marginPercent == null ? 0 : Number(body.marginPercent);
+  const marginPercent = currency === 'USD' && body.marginPercent !== '' && body.marginPercent != null ? Number(body.marginPercent) : 0;
   const priceMultiplier = body.priceMultiplier === '' || body.priceMultiplier == null ? 1 : Number(body.priceMultiplier);
-  const convertedAmount = Number.isFinite(dollarAmount * dollarRate) ? Number((dollarAmount * dollarRate).toFixed(2)) : Number.NaN;
-  const legacyMrp = body.mrp === '' || body.mrp == null ? Number.NaN : Number(body.mrp);
-  const finalRate = !hasDollarAmount && Number.isFinite(legacyMrp) ? legacyMrp : (Number.isFinite(convertedAmount) ? Number((convertedAmount * (1 + marginPercent / 100) * priceMultiplier).toFixed(2)) : Number.NaN);
+  const pricing = calculateProductPricing({ currency, priceAmount: amount, dollarRate, marginPercent, priceMultiplier });
   return {
     name: String(body.name || body.description || '').trim(),
     partCode: String(body.partCode || body.code || '').trim().toUpperCase(),
@@ -71,15 +74,17 @@ function normalizeProduct(body = {}, imageFile) {
     image: imageFile ? `/public/products/${imageFile.filename}` : String(body.image || '').trim(),
     taxRate: body.taxRate === '' || body.taxRate == null ? Number.NaN : Number(body.taxRate),
     hsnCode: String(body.hsnCode || '').trim(),
+    currency,
     // Keep the legacy MRP field synchronized so older tables and integrations use the finalized rate.
-    mrp: finalRate,
-    dollarAmount, convertedAmount, finalRate, dollarRate, marginPercent, priceMultiplier,
+    mrp: pricing.finalRate,
+    ...pricing,
     isActive: body.isActive !== false,
   };
 }
 
 function validateProduct(product) {
   if (!product.partCode || !product.description || !product.category) return 'Part code, description, and category are required.';
+  if (!['USD', 'INR'].includes(product.currency)) return 'Please select USD or INR as the product currency.';
   if (!Number.isFinite(product.mrp) || product.mrp < 0) return 'Price must be a valid non-negative number.';
   if (![product.dollarAmount, product.convertedAmount, product.finalRate, product.dollarRate, product.marginPercent, product.priceMultiplier].every((number) => Number.isFinite(number) && number >= 0)) return 'Pricing values must be valid non-negative numbers.';
   if (!taxRates.includes(product.taxRate)) return 'Please select a valid GST rate.';
