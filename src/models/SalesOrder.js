@@ -2,6 +2,9 @@ import mongoose from 'mongoose';
 
 const salesOrderSchema = new mongoose.Schema({
   leadId: { type: mongoose.Schema.Types.ObjectId, ref: 'Lead', default: undefined },
+  // Separate from leadId so a direct order does not trigger the one-order-per-lead flow.
+  customerLeadId: { type: mongoose.Schema.Types.ObjectId, ref: 'Lead', default: null },
+  contactPersonId: { type: mongoose.Schema.Types.ObjectId, default: null },
   quotationId: { type: mongoose.Schema.Types.ObjectId, ref: 'Quotation', default: null },
   company: { type: String, required: true, trim: true, maxlength: 120 },
   contactName: { type: String, trim: true, maxlength: 120, default: '' },

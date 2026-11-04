@@ -40,13 +40,13 @@ function serializeLead(lead) {
   };
 }
 
-router.get('/', requireAuth, requireAnyPermission('leads.view', 'customers.view', 'quotations.view'), async (request, response, next) => {
+router.get('/', requireAuth, requireAnyPermission('leads.view', 'customers.view', 'quotations.view', 'salesOrders.view'), async (request, response, next) => {
   try {
     const { status, search, dateFrom, dateTo } = request.query;
     const page = Math.max(Number.parseInt(request.query.page, 10) || 1, 1);
     const limit = Math.min(Math.max(Number.parseInt(request.query.limit, 10) || 20, 1), 100);
     const isLeadOrCustomerView = request.permissions?.includes('leads.view') || request.permissions?.includes('customers.view');
-    const hasTeamScope = canViewAll(request, 'leads') || canViewAll(request, 'customers');
+    const hasTeamScope = canViewAll(request, 'leads') || canViewAll(request, 'customers') || canViewAll(request, 'salesOrders');
     const filter = hasTeamScope ? {} : isLeadOrCustomerView ? { createdBy: request.user._id } : { assignedTo: request.user._id };
     const validStatuses = ['New', 'Quotation', 'Followup', 'Performa-Invoice', 'Done', 'Lost'];
 

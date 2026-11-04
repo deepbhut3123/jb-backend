@@ -7,6 +7,8 @@ export async function createSalesOrderForLead(lead, createdBy, source = 'lead-st
   const firstPerson = lead.companyPersons?.[0] || {};
   const payload = {
     leadId: lead._id,
+    customerLeadId: lead._id,
+    contactPersonId: firstPerson._id || null,
     company: lead.company || lead.name || 'Unnamed company',
     contactName: firstPerson.name || lead.name || '',
     email: firstPerson.email || lead.email || '',
@@ -37,6 +39,8 @@ export async function createSalesOrderForQuotation(quotation, createdBy) {
   const lead = quotation.leadId && typeof quotation.leadId === 'object' ? quotation.leadId : {};
   const payload = {
     leadId,
+    customerLeadId: leadId,
+    contactPersonId: quotation.contactPersonId || null,
     quotationId: quotation._id,
     company: quotation.company || lead.company || lead.name || 'Unnamed company',
     contactName: quotation.contactName || quotation.customerName || '',

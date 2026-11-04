@@ -20,6 +20,8 @@ function serializeOrder(order) {
     ...order,
     _id: String(order._id),
     leadId: lead?._id ? String(lead._id) : order.leadId ? String(order.leadId) : null,
+    customerLeadId: order.customerLeadId ? String(order.customerLeadId) : null,
+    contactPersonId: order.contactPersonId ? String(order.contactPersonId) : null,
     leadName: lead?.company || '',
     createdBy: order.createdBy?._id ? String(order.createdBy._id) : order.createdBy ? String(order.createdBy) : '',
     createdByName: order.createdBy?.name || '',
@@ -56,6 +58,8 @@ function normalizeOrder(body = {}) {
   const freightPacking = Math.max(Number(body.freightPacking) || 0, 0);
   const orderDate = body.orderDate ? new Date(body.orderDate) : new Date();
   return {
+    customerLeadId: String(body.customerLeadId || '').trim() || null,
+    contactPersonId: String(body.contactPersonId || '').trim() || null,
     company: String(body.company || '').trim(),
     contactName: String(body.contactName || '').trim(),
     email: String(body.email || '').trim().toLowerCase(),
@@ -70,6 +74,17 @@ function normalizeOrder(body = {}) {
     status: String(body.status || 'Pending'),
     notes: String(body.notes || '').trim(),
   };
+}
+
+async function validateCustomerSelection(order, request) {
+  if (!order.customerLeadId) return order.contactPersonId ? 'Select a company before selecting a person.' : null;
+  if (!mongoose.Types.ObjectId.isValid(order.customerLeadId)) return 'Select a valid company.';
+  const lead = await Lead.findById(order.customerLeadId).lean();
+  if (!lead) return 'The selected company no longer exists.';
+  const canAccessLead = isAdmin(request.user) || request.permissions?.includes('salesOrders.viewAll') || request.permissions?.includes('leads.viewAll') || String(lead.createdBy) === String(request.user._id) || String(lead.assignedTo) === String(request.user._id);
+  if (!canAccessLead) return 'You do not have access to this company.';
+  if (order.contactPersonId && (!mongoose.Types.ObjectId.isValid(order.contactPersonId) || !lead.companyPersons?.some((person) => String(person._id) === order.contactPersonId))) return 'The selected person does not belong to this company.';
+  return null;
 }
 
 function validateOrder(order) {
@@ -130,6 +145,8 @@ router.post('/', requirePermission('salesOrders.create'), async (request, respon
     const orderData = normalizeOrder(request.body);
     const validationError = validateOrder(orderData);
     if (validationError) return response.status(400).json({ message: validationError });
+    const customerError = await validateCustomerSelection(orderData, request);
+    if (customerError) return response.status(400).json({ message: customerError });
     const order = await SalesOrder.create({ ...orderData, source: 'manual', createdBy: request.user._id });
     const populated = await SalesOrder.findById(order._id).populate('createdBy', 'name').lean();
     return response.status(201).json({ order: serializeOrder(populated) });
@@ -141,6 +158,8 @@ router.put('/:id', requirePermission('salesOrders.edit'), async (request, respon
     const orderData = normalizeOrder(request.body);
     const validationError = validateOrder(orderData);
     if (validationError) return response.status(400).json({ message: validationError });
+    const customerError = await validateCustomerSelection(orderData, request);
+    if (customerError) return response.status(400).json({ message: customerError });
     const order = await SalesOrder.findOneAndUpdate({ ...orderScope(request), _id: request.params.id }, orderData, { new: true, runValidators: true }).populate('leadId', 'company name').populate('createdBy', 'name');
     if (!order) return response.status(404).json({ message: 'Sales order not found.' });
     return response.json({ order: serializeOrder(order.toObject()) });

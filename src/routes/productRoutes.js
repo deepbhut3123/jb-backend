@@ -104,7 +104,7 @@ router.get('/filter-options', requireAnyPermission('products.view', 'quotations.
   } catch (error) { return next(error); }
 });
 
-router.get('/', requireAnyPermission('products.view', 'quotations.view'), async (request, response, next) => {
+router.get('/', requireAnyPermission('products.view', 'quotations.view', 'salesOrders.view'), async (request, response, next) => {
   try {
     const page = Math.max(Number.parseInt(request.query.page, 10) || 1, 1);
     const limit = Math.min(Math.max(Number.parseInt(request.query.limit, 10) || 10, 1), 1000);

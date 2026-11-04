@@ -4,6 +4,7 @@ import Quotation from '../models/Quotation.js';
 import QuotationCounter from '../models/QuotationCounter.js';
 import Product from '../models/Product.js';
 import Lead from '../models/Lead.js';
+import SalesOrder from '../models/SalesOrder.js';
 import { requireAuth, requirePermission } from '../middleware/auth.js';
 import { createSalesOrderForQuotation } from '../services/salesOrders.js';
 
@@ -186,6 +187,29 @@ router.get('/summary', requirePermission('quotations.view'), async (request, res
       Quotation.countDocuments({ ...filter, revisionNumber: { $gt: 0 } }),
     ]);
     return response.json({ summary: { total, sent, draft, revisions } });
+  } catch (error) { return next(error); }
+});
+
+router.get('/pricing-history', requirePermission('quotations.view'), async (request, response, next) => {
+  try {
+    const { leadId, productId, productCode } = request.query;
+    if (!mongoose.Types.ObjectId.isValid(leadId) || !mongoose.Types.ObjectId.isValid(productId)) return response.status(400).json({ message: 'A valid customer and product are required.' });
+    const productFilter = { $or: [{ 'items.productId': productId }, { 'items.productCode': String(productCode || '').trim() }] };
+    // Pricing is customer history, so it must not be hidden just because a
+    // different team member created the order or quotation.
+    const [salesOrders, quotations] = await Promise.all([
+      SalesOrder.find({ leadId, ...productFilter }).sort({ orderDate: -1, createdAt: -1 }).limit(5).lean(),
+      Quotation.find({ leadId, ...productFilter }).sort({ quotationDate: -1, createdAt: -1 }).limit(5).lean(),
+    ]);
+    const suggestions = [...salesOrders.map((record) => ({ record, source: 'salesOrder' })), ...quotations.map((record) => ({ record, source: 'quotation' }))]
+      .map(({ record, source }) => {
+        const item = record.items.find((entry) => String(entry.productId) === String(productId) || (productCode && entry.productCode === productCode));
+        const quantity = Number(item?.quantity || 0);
+        const unitPrice = quantity > 0 ? Number((Number(item.lineTotal ?? (quantity * item.unitPrice)) / quantity).toFixed(2)) : Number(item?.unitPrice || 0);
+        return { unitPrice, source };
+      })
+      .filter((item, index, list) => Number.isFinite(item.unitPrice) && !list.slice(0, index).some((previous) => previous.unitPrice === item.unitPrice));
+    return response.json({ suggestions });
   } catch (error) { return next(error); }
 });
 
