@@ -4,6 +4,7 @@ import User from '../models/User.js';
 import { requireAuth, requireAnyPermission } from '../middleware/auth.js';
 import { sendWhatsAppMessage } from '../services/whatsapp.js';
 import { hasInvalidCompanyPersonEmail, normalizeCompanyPersons, serializeCompanyPersons } from '../utils/companyPersons.js';
+import { createSalesOrderForLead } from '../services/salesOrders.js';
 
 const router = Router();
 const isAdmin = (user) => [1, 3].includes(user.role);
@@ -39,13 +40,13 @@ function serializeLead(lead) {
   };
 }
 
-router.get('/', requireAuth, requireAnyPermission('leads.view', 'customers.view', 'quotations.view'), async (request, response, next) => {
+router.get('/', requireAuth, requireAnyPermission('leads.view', 'customers.view', 'quotations.view', 'salesOrders.view'), async (request, response, next) => {
   try {
     const { status, search, dateFrom, dateTo } = request.query;
     const page = Math.max(Number.parseInt(request.query.page, 10) || 1, 1);
     const limit = Math.min(Math.max(Number.parseInt(request.query.limit, 10) || 20, 1), 100);
     const isLeadOrCustomerView = request.permissions?.includes('leads.view') || request.permissions?.includes('customers.view');
-    const hasTeamScope = canViewAll(request, 'leads') || canViewAll(request, 'customers');
+    const hasTeamScope = canViewAll(request, 'leads') || canViewAll(request, 'customers') || canViewAll(request, 'salesOrders');
     const filter = hasTeamScope ? {} : isLeadOrCustomerView ? { createdBy: request.user._id } : { assignedTo: request.user._id };
     const validStatuses = ['New', 'Quotation', 'Followup', 'Performa-Invoice', 'Done', 'Lost'];
 
@@ -95,8 +96,9 @@ router.post('/', requireAuth, requireAnyPermission('leads.create'), async (reque
     if (!assignee) return response.status(404).json({ message: 'Assigned user was not found.' });
     const followUps = [];
     const lead = await Lead.create({ company: company?.trim(), address1, address2, area, city, state, website, customerType, segment, companyPersons: normalizedCompanyPersons, leadSource: leadSource || source || '', source: leadSource || source || '', stage: stage || status || 'New', status: stage || status || 'New', priority: priority || 'Medium', nextFollowUp: nextFollowUp || undefined, followUps, assignedTo: assignee._id, createdBy: request.user._id });
+    const salesOrderResult = lead.stage === 'Done' ? await createSalesOrderForLead(lead.toObject(), request.user._id, 'lead-stage') : null;
     const populated = await lead.populate('assignedTo', 'name');
-    return response.status(201).json({ lead: serializeLead(populated.toObject()) });
+    return response.status(201).json({ lead: serializeLead(populated.toObject()), salesOrderCreated: Boolean(salesOrderResult?.created) });
   } catch (error) { return next(error); }
 });
 
@@ -108,11 +110,16 @@ router.put('/:id', requireAuth, requireAnyPermission('leads.edit'), async (reque
     const { company, address1, address2, area, city, state, website, customerType, segment, companyPersons, leadSource, source, stage, status, priority, nextFollowUp, assignedTo } = request.body || {};
     const normalizedCompanyPersons = normalizeCompanyPersons(companyPersons);
     if (hasInvalidCompanyPersonEmail(normalizedCompanyPersons)) return response.status(400).json({ message: 'Enter a valid email address for each person.' });
-    Object.assign(lead, { name: undefined, email: undefined, phone: undefined, company: company?.trim(), address1, address2, area, city, state, website, customerType, segment, companyPersons: normalizedCompanyPersons, leadSource: leadSource || source || '', source: leadSource || source || '', stage: stage || status || 'New', status: stage || status || 'New', priority: priority || 'Medium', nextFollowUp: nextFollowUp || undefined });
+    const previousStage = lead.stage || lead.status;
+    const nextStage = stage || status || 'New';
+    Object.assign(lead, { name: undefined, email: undefined, phone: undefined, company: company?.trim(), address1, address2, area, city, state, website, customerType, segment, companyPersons: normalizedCompanyPersons, leadSource: leadSource || source || '', source: leadSource || source || '', stage: nextStage, status: nextStage, priority: priority || 'Medium', nextFollowUp: nextFollowUp || undefined });
     if (isAdmin(request.user) && assignedTo) lead.assignedTo = assignedTo;
     await lead.save();
+    const salesOrderResult = nextStage === 'Done' && previousStage !== 'Done'
+      ? await createSalesOrderForLead(lead.toObject(), request.user._id, 'lead-stage')
+      : null;
     const populated = await lead.populate('assignedTo', 'name');
-    return response.json({ lead: serializeLead(populated.toObject()) });
+    return response.json({ lead: serializeLead(populated.toObject()), salesOrderCreated: Boolean(salesOrderResult?.created) });
   } catch (error) { return next(error); }
 });
 

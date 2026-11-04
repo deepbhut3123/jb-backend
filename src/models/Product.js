@@ -13,6 +13,7 @@ const productSchema = new mongoose.Schema(
     subSubCategory: { type: String, trim: true, maxlength: 80 },
     image: { type: String, trim: true, maxlength: 500 },
     taxRate: { type: Number, min: 0, enum: [0, 5, 12, 18, 28], default: 18 },
+    currency: { type: String, enum: ['USD', 'INR'], default: 'USD' },
     mrp: { type: Number, min: 0 },
     dollarAmount: { type: Number, min: 0, default: 0 },
     convertedAmount: { type: Number, min: 0, default: 0 },
