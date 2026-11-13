@@ -9,6 +9,7 @@ const userSchema = new mongoose.Schema(
     role: { type: Number, default: 2, enum: [1, 2, 3] },
     roleProfile: { type: mongoose.Schema.Types.ObjectId, ref: 'Role', default: null },
     isVerified: { type: Boolean, default: true },
+    salesTarget: { type: Number, min: 0, default: 0 },
   },
   { timestamps: true },
 );
