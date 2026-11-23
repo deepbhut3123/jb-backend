@@ -12,6 +12,10 @@ const router = Router();
 const isAdmin = (user) => [1, 3].includes(user.role);
 const statuses = ['Draft', 'Sent', 'Accepted', 'Rejected'];
 
+function quotationItemUnit(code) {
+  return /(?:^|[\s/-])(?:HGR|SCR|SBR|LM)(?=[A-Z0-9])/i.test(String(code || '')) ? 'Mtr' : 'Nos.';
+}
+
 function normalizeIndianMobile(value) {
   const raw = String(value || '').trim();
   if (!raw) return '';
@@ -91,7 +95,8 @@ async function normalizeQuotation(body = {}) {
     const discountPercent = lineSubtotal > 0 ? Number(((discountAmount / lineSubtotal) * 100).toFixed(6)) : 0;
     const lineTotal = Number((lineSubtotal - discountAmount).toFixed(2));
     const description = String(item.description ?? product?.description ?? productName).trim();
-    return { productId: product?._id || null, productName, productCode: product?.partCode || product?.code || '', description, unit: product?.unit || String(item.unit || '').trim(), quantity, unitPrice, taxRate: requestedTaxRate, lineSubtotal, discountPercent, discountAmount, lineTotal };
+    const productCode = product?.partCode || product?.code || '';
+    return { productId: product?._id || null, productName, productCode, description, unit: quotationItemUnit(productCode || item.productName), quantity, unitPrice, taxRate: requestedTaxRate, lineSubtotal, discountPercent, discountAmount, lineTotal };
   }).filter(Boolean);
   const subtotal = Number(items.reduce((total, item) => total + item.lineSubtotal, 0).toFixed(2));
   const discountAmount = Number(items.reduce((total, item) => total + item.discountAmount, 0).toFixed(2));

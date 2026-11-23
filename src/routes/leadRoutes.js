@@ -90,6 +90,7 @@ router.post('/', requireAuth, requireAnyPermission('leads.create'), async (reque
     const { company, address1, address2, area, city, state, website, customerType, segment, companyPersons, leadSource, source, stage, status, priority, nextFollowUp, assignedTo } = request.body || {};
     const normalizedCompanyPersons = normalizeCompanyPersons(companyPersons);
     if (hasInvalidCompanyPersonEmail(normalizedCompanyPersons)) return response.status(400).json({ message: 'Enter a valid email address for each person.' });
+    if (!normalizedCompanyPersons.length || normalizedCompanyPersons.some((person) => !person.number)) return response.status(400).json({ message: 'A phone number is required for each person.' });
     const selectedAssignee = isAdmin(request.user) ? assignedTo : request.user._id;
     if (!selectedAssignee) return response.status(400).json({ message: 'An assigned user is required.' });
     const assignee = await User.findById(selectedAssignee).select('_id name').lean();
@@ -110,6 +111,7 @@ router.put('/:id', requireAuth, requireAnyPermission('leads.edit'), async (reque
     const { company, address1, address2, area, city, state, website, customerType, segment, companyPersons, leadSource, source, stage, status, priority, nextFollowUp, assignedTo } = request.body || {};
     const normalizedCompanyPersons = normalizeCompanyPersons(companyPersons);
     if (hasInvalidCompanyPersonEmail(normalizedCompanyPersons)) return response.status(400).json({ message: 'Enter a valid email address for each person.' });
+    if (!normalizedCompanyPersons.length || normalizedCompanyPersons.some((person) => !person.number)) return response.status(400).json({ message: 'A phone number is required for each person.' });
     const previousStage = lead.stage || lead.status;
     const nextStage = stage || status || 'New';
     Object.assign(lead, { name: undefined, email: undefined, phone: undefined, company: company?.trim(), address1, address2, area, city, state, website, customerType, segment, companyPersons: normalizedCompanyPersons, leadSource: leadSource || source || '', source: leadSource || source || '', stage: nextStage, status: nextStage, priority: priority || 'Medium', nextFollowUp: nextFollowUp || undefined });
