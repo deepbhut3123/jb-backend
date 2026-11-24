@@ -8,7 +8,7 @@ export const PERMISSION_MODULES = [
   { key: 'categories', label: 'Categories', actions: ['menu', 'view', 'create', 'edit', 'delete'] },
   { key: 'customers', label: 'Customers', actions: ['menu', 'view', 'viewAll', 'create', 'edit', 'delete'] },
   { key: 'users', label: 'User management', actions: ['menu', 'view', 'create', 'edit', 'delete'] },
-  { key: 'settings', label: 'Pricing settings', actions: ['menu', 'view', 'edit'] },
+  { key: 'settings', label: 'Settings', actions: ['menu', 'view', 'edit'] },
   { key: 'whatsapp', label: 'WhatsApp', actions: ['menu', 'view', 'edit'] },
 ];
 
